@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentChat 后端链路学习手册</title>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+       color:#1e293b;background:#f8fafc;line-height:1.7;margin:0;padding:32px;}
+  .wrap{max-width:880px;margin:0 auto;}
+  h1{font-size:22px;margin:0 0 4px;}
+  h2{font-size:17px;margin:36px 0 10px;padding-bottom:6px;border-bottom:1px solid #e2e8f0;}
+  p{margin:8px 0;}
+  .muted{color:#64748b;font-size:13px;}
+  .card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:18px;margin:16px 0;}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px;}
+  th,td{border:1px solid #e2e8f0;padding:8px 10px;text-align:left;vertical-align:top;}
+  th{background:#f1f5f9;font-weight:500;}
+  code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px;color:#0c447c;}
+  .warn{background:#fef3c7;border:1px solid #f59e0b;border-radius:10px;padding:12px 14px;font-size:13px;}
+  svg{width:100%;height:auto;display:block;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>AgentChat 后端链路学习手册</h1>
+<p class="muted">从请求进入到落库，逐层拆解后端调用链。所有结论均来自源码实测。</p>
+
+<h2>1. 全景链路</h2>
+<div class="card">
+<svg viewBox="0 0 680 418" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="后端请求全景链路">
+  <title>后端请求全景链路</title>
+  <defs><marker id="a1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+  <g><rect x="140" y="30" width="400" height="48" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/><text x="340" y="50" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#0C447C">前端 / 浏览器</text><text x="340" y="68" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="400" fill="#185FA5">端口 8090 · 用户交互入口</text></g>
+  <line x1="340" y1="78" x2="340" y2="104" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#a1)"/>
+  <g><rect x="140" y="104" width="400" height="56" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/><text x="340" y="124" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#0C447C">FastAPI 应用 (main.py)</text><text x="340" y="144" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="400" fill="#185FA5">uvicorn :7860 · Nginx 反代 · 中间件 + JWT 鉴权</text></g>
+  <line x1="340" y1="160" x2="340" y2="186" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#a1)"/>
+  <g><rect x="140" y="186" width="400" height="48" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/><text x="340" y="206" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#0C447C">POST /api/v1/completion</text><text x="340" y="224" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="400" fill="#185FA5">对话入口 · 装配 GeneralAgent</text></g>
+  <line x1="340" y1="234" x2="340" y2="260" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#a1)"/>
+  <g><rect x="140" y="260" width="400" height="56" rx="10" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/><text x="340" y="280" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#633806">GeneralAgent 编排核心</text><text x="340" y="300" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="400" fill="#854F0B">ReAct 循环 · 工具: MCP / Skill / RAG / 工具</text></g>
+  <line x1="340" y1="316" x2="340" y2="342" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#a1)"/>
+  <g><rect x="140" y="342" width="400" height="56" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/><text x="340" y="362" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#0C447C">外部依赖贯穿全链路</text><text x="340" y="382" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="400" fill="#185FA5">DashScope LLM · Chroma 记忆 · MySQL · Redis · MinIO</text></g>
+</svg>
+</div>
+
+<h2>2. GeneralAgent 编排结构</h2>
+<div class="card">
+<svg viewBox="0 0 680 410" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="GeneralAgent 编排结构">
+  <title>GeneralAgent 编排结构</title>
+  <defs><marker id="a2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+  <rect x="40" y="30" width="600" height="360" rx="20" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
+  <text x="340" y="56" text-anchor="middle" font-size="14" font-weight="500" fill="#3C3489">GeneralAgent · core/agents/general_agent.py</text>
+  <rect x="120" y="76" width="440" height="40" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+  <text x="340" y="96" text-anchor="middle" font-size="13" font-weight="500" fill="#0C447C">create_agent(model, tools, middleware)</text>
+  <line x1="340" y1="116" x2="340" y2="132" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#a2)"/>
+  <rect x="120" y="132" width="440" height="58" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
+  <text x="340" y="152" text-anchor="middle" font-size="14" font-weight="500" fill="#3C3489">ReAct 循环</text>
+  <text x="340" y="172" text-anchor="middle" font-size="12" font-weight="400" fill="#534AB7">LLM 决策 → 工具执行 → 结果回流 → 直到无 tool_calls</text>
+  <line x1="340" y1="190" x2="340" y2="202" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#a2)"/>
+  <rect x="120" y="202" width="440" height="38" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+  <text x="340" y="221" text-anchor="middle" font-size="12" font-weight="500" fill="#633806">EmitEventAgentMiddleware · 流式推送 START / END / ERROR 事件</text>
+  <text x="340" y="266" text-anchor="middle" font-size="13" font-weight="500" fill="#444441">工具集（作为 @tool 挂入 agent）</text>
+  <g><rect x="50" y="282" width="180" height="44" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/><text x="140" y="300" text-anchor="middle" font-size="13" font-weight="500" fill="#0C447C">MCP 子代理</text><text x="140" y="318" text-anchor="middle" font-size="11" font-weight="400" fill="#185FA5">嵌套 ReAct</text></g>
+  <g><rect x="250" y="282" width="180" height="44" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/><text x="340" y="300" text-anchor="middle" font-size="13" font-weight="500" fill="#0C447C">Skill 子代理</text><text x="340" y="318" text-anchor="middle" font-size="11" font-weight="400" fill="#185FA5">嵌套 ReAct</text></g>
+  <g><rect x="450" y="282" width="180" height="44" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/><text x="540" y="300" text-anchor="middle" font-size="13" font-weight="500" fill="#0C447C">RAG 知识库</text><text x="540" y="318" text-anchor="middle" font-size="11" font-weight="400" fill="#185FA5">向量检索</text></g>
+  <g><rect x="150" y="336" width="180" height="44" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/><text x="240" y="354" text-anchor="middle" font-size="13" font-weight="500" fill="#0C447C">OpenAPI 工具</text><text x="240" y="372" text-anchor="middle" font-size="11" font-weight="400" fill="#185FA5">用户自定义</text></g>
+  <g><rect x="350" y="336" width="180" height="44" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/><text x="440" y="354" text-anchor="middle" font-size="13" font-weight="500" fill="#0C447C">内置工具</text><text x="440" y="372" text-anchor="middle" font-size="11" font-weight="400" fill="#185FA5">AgentTools</text></g>
+</svg>
+</div>
+
+<h2>3. MCP 子代理接入链路</h2>
+<div class="card">
+<svg viewBox="0 0 680 374" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="MCP 子代理接入链路">
+  <title>MCP 子代理接入链路</title>
+  <defs><marker id="a3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+  <g><rect x="60" y="30" width="340" height="44" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/><text x="230" y="50" text-anchor="middle" font-size="13" font-weight="500" fill="#0C447C">MCPConfig(type=sse, url)</text><text x="230" y="68" text-anchor="middle" font-size="11" font-weight="400" fill="#185FA5">server_name / mcp_server_id</text></g>
+  <line x1="230" y1="74" x2="230" y2="98" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#a3)"/>
+  <g><rect x="60" y="98" width="340" height="44" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/><text x="230" y="118" text-anchor="middle" font-size="13" font-weight="500" fill="#0C447C">convert_mcp_config → MCPManager</text><text x="230" y="136" text-anchor="middle" font-size="11" font-weight="400" fill="#185FA5">utils/convert.py</text></g>
+  <line x1="230" y1="142" x2="230" y2="166" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#a3)"/>
+  <g><rect x="60" y="166" width="340" height="48" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/><text x="230" y="186" text-anchor="middle" font-size="13" font-weight="500" fill="#0C447C">MultiServerMCPClient 连接</text><text x="230" y="204" text-anchor="middle" font-size="11" font-weight="400" fill="#185FA5">SSE / streamable_http / websocket</text></g>
+  <line x1="230" y1="214" x2="230" y2="238" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#a3)"/>
+  <g><rect x="60" y="238" width="340" height="44" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/><text x="230" y="258" text-anchor="middle" font-size="13" font-weight="500" fill="#0C447C">拉取远端 tools → 包装 @tool</text><text x="230" y="276" text-anchor="middle" font-size="11" font-weight="400" fill="#185FA5">call_mcp_agent(query)</text></g>
+  <line x1="230" y1="282" x2="230" y2="306" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#a3)"/>
+  <g><rect x="60" y="306" width="340" height="48" rx="10" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/><text x="230" y="326" text-anchor="middle" font-size="13" font-weight="500" fill="#633806">MCPAgent.ainvoke(query)</text><text x="230" y="344" text-anchor="middle" font-size="11" font-weight="400" fill="#854F0B">嵌套 ReAct · 返回结果给主 Agent</text></g>
+  <line x1="400" y1="190" x2="430" y2="190" stroke="#5F5E5A" stroke-width="1" stroke-dasharray="4 3" marker-end="url(#a3)"/>
+  <g><rect x="430" y="166" width="210" height="72" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5" stroke-dasharray="4 3"/><text x="535" y="190" text-anchor="middle" font-size="13" font-weight="500" fill="#444441">type = stdio</text><text x="535" y="210" text-anchor="middle" font-size="12" font-weight="400" fill="#5F5E5A">convert 返回 None</text><text x="535" y="228" text-anchor="middle" font-size="12" font-weight="400" fill="#5F5E5A">不进执行链路</text></g>
+</svg>
+</div>
+<div class="warn">关键约束：<code>convert_mcp_config</code> 只对 <code>sse</code> / <code>websocket</code> / <code>streamable_http</code> 生成配置；<code>type=stdio</code> 走 <code>else: pass</code> 返回 <code>None</code>。所以本地 stdio MCP 脚本进不了 Agent 调用链，必须跑成 SSE（或 streamable_http）才能被 Agent 调用。</div>
+
+<h2>4. SSE 流式响应链路</h2>
+<div class="card">
+<svg viewBox="0 0 680 440" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="SSE 流式响应链路">
+  <title>SSE 流式响应链路</title>
+  <defs><marker id="a4" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+  <g><rect x="140" y="30" width="400" height="44" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/><text x="340" y="50" text-anchor="middle" font-size="13" font-weight="500" fill="#0C447C">客户端 POST /completion (SSE)</text><text x="340" y="68" text-anchor="middle" font-size="11" font-weight="400" fill="#185FA5">auth JWT · 取 agent 配置</text></g>
+  <line x1="340" y1="74" x2="340" y2="98" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#a4)"/>
+  <g><rect x="140" y="98" width="400" height="48" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/><text x="340" y="118" text-anchor="middle" font-size="13" font-weight="500" fill="#0C447C">GeneralAgent.astream(messages)</text><text x="340" y="136" text-anchor="middle" font-size="11" font-weight="400" fill="#185FA5">异步生成器 · yield 事件流</text></g>
+  <line x1="340" y1="146" x2="180" y2="180" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#a4)"/>
+  <line x1="340" y1="146" x2="500" y2="180" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#a4)"/>
+  <g><rect x="60" y="180" width="240" height="56" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/><text x="180" y="200" text-anchor="middle" font-size="13" font-weight="500" fill="#0C447C">response_chunk 事件</text><text x="180" y="218" text-anchor="middle" font-size="11" font-weight="400" fill="#185FA5">LLM 输出 token 流</text></g>
+  <g><rect x="380" y="180" width="240" height="56" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/><text x="500" y="200" text-anchor="middle" font-size="13" font-weight="500" fill="#3C3489">event 事件</text><text x="500" y="218" text-anchor="middle" font-size="11" font-weight="400" fill="#534AB7">工具 START / END / ERROR</text></g>
+  <line x1="180" y1="236" x2="340" y2="300" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#a4)"/>
+  <line x1="500" y1="236" x2="340" y2="300" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#a4)"/>
+  <g><rect x="140" y="300" width="400" height="48" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/><text x="340" y="320" text-anchor="middle" font-size="13" font-weight="500" fill="#0C447C">WatchedStreamingResponse</text><text x="340" y="338" text-anchor="middle" font-size="11" font-weight="400" fill="#185FA5">逐条推送 SSE: data: {json}</text></g>
+  <line x1="340" y1="348" x2="340" y2="372" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#a4)"/>
+  <g><rect x="140" y="372" width="400" height="48" rx="10" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/><text x="340" y="392" text-anchor="middle" font-size="13" font-weight="500" fill="#27500A">流结束 → 落库</text><text x="340" y="410" text-anchor="middle" font-size="11" font-weight="400" fill="#3B6D11">历史 / 摘要 / 长期记忆</text></g>
+</svg>
+</div>
+
+<h2>关键代码位置</h2>
+<table>
+<tr><th>职责</th><th>文件</th><th>要点</th></tr>
+<tr><td>应用入口 / 中间件 / 生命周期</td><td><code>agentchat/main.py</code></td><td>uvicorn :7860；CORS/Trace/白名单中间件；lifespan 初始化配置、MySQL 种子、Redis SessionManager</td></tr>
+<tr><td>路由装配</td><td><code>api/router.py</code> · <code>api/v1/router.py</code></td><td>挂载 /api/v1 各子路由 + mcp_proxy</td></tr>
+<tr><td>对话入口（SSE）</td><td><code>api/v1/completion.py</code></td><td>取 agent 配置、拼消息（历史+记忆+摘要）、调用 GeneralAgent.astream、流式落库</td></tr>
+<tr><td>会话管理</td><td><code>api/v1/dialog.py</code></td><td>对话列表/创建/删除；注意 agent 展示字段不能覆盖会话自身时间字段</td></tr>
+<tr><td>Agent 编排核心</td><td><code>core/agents/general_agent.py</code></td><td>init_agent 装配 MCP/Skill/RAG/工具；create_agent ReAct 循环；EmitEventAgentMiddleware</td></tr>
+<tr><td>MCP 子代理</td><td><code>core/agents/mcp_agent.py</code></td><td>MCPConfig + MCPManager 连接远端、拉工具、嵌套 ainvoke</td></tr>
+<tr><td>MCP 配置转换</td><td><code>utils/convert.py</code></td><td>仅 sse/websocket/streamable_http 生效；stdio 返回 None</td></tr>
+<tr><td>MCP 客户端</td><td><code>services/mcp/manager.py</code></td><td>MultiServerMCPClient 连接并拉取工具</td></tr>
+<tr><td>模型调用</td><td><code>core/models/manager.py</code></td><td>ChatOpenAI（OpenAI 兼容，base_url 指向 DashScope）；对话/工具调用/推理/VL/embedding 多模型</td></tr>
+<tr><td>长期记忆</td><td><code>services/memory/client.py</code></td><td>Chroma 向量库 + Embedding；search/add（LLM 抽取事实并 ADD/UPDATE/DELETE）</td></tr>
+<tr><td>流式响应</td><td><code>api/responses/streaming.py</code></td><td>WatchedStreamingResponse；监听断开并回调 stop_streaming_callback</td></tr>
+<tr><td>对象存储</td><td><code>services/storage/minio.py</code> · <code>oss.py</code></td><td>文件 / 图片上传（upload.py、知识库、消息 file_url 使用）</td></tr>
+</table>
+
+<h2>一句话总结</h2>
+<p>请求经 <code>main.py</code> → 中间件 → <code>POST /completion</code> 进入 <code>GeneralAgent</code>；它把 MCP / Skill / RAG / OpenAPI / 内置工具都包成 <code>@tool</code>，用 LangGraph <code>create_agent</code> 跑 ReAct 循环，循环里 LLM 决策调工具、工具（尤其是 MCP/Skill）本身又是一个嵌套 ReAct；过程中产生的 token 与工具事件通过 SSE 实时推回前端，流结束后再把历史/摘要/记忆落库。</p>
+</div>
+</body>
+</html>

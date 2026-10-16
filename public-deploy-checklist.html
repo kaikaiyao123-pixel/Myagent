@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentChat 公网部署清单</title>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+       color:#1e293b;background:#f8fafc;line-height:1.7;margin:0;padding:32px;}
+  .wrap{max-width:900px;margin:0 auto;}
+  h1{font-size:22px;margin:0 0 4px;}
+  h2{font-size:17px;margin:30px 0 8px;padding-bottom:6px;border-bottom:1px solid #e2e8f0;}
+  p{margin:8px 0;}
+  .muted{color:#64748b;font-size:13px;}
+  .card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:18px;margin:14px 0;}
+  .path{display:flex;gap:10px;margin:10px 0;}
+  .tag{flex:1;background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:12px 14px;}
+  .tag.b{border-color:#bbf7d0;background:#f0fdf4;}
+  label{display:flex;gap:10px;align-items:flex-start;padding:7px 0;font-size:14px;cursor:pointer;}
+  input[type=checkbox]{margin-top:4px;width:16px;height:16px;flex:none;}
+  code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px;color:#0c447c;}
+  .warn{background:#fef3c7;border:1px solid #f59e0b;border-radius:10px;padding:12px 14px;font-size:13px;margin:12px 0;}
+  .step{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#0f172a;color:#e2e8f0;
+        border-radius:10px;padding:14px 16px;font-size:12.5px;white-space:pre;overflow-x:auto;}
+  .must{color:#b91c1c;font-weight:600;}
+  hr{border:none;border-top:1px dashed #cbd5e1;margin:18px 0;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>AgentChat 公网部署清单</h1>
+<p class="muted">两条上公网路径，按需选一。仓库已备齐两套脚本：<code>deploy.sh</code>（云服务器）与 <code>start_tunnel.sh</code>（内网穿透）。</p>
+
+<div class="path">
+  <div class="tag">
+    <strong>方案 A · 云服务器（正式）</strong>
+    <p class="muted">固定地址、长期可用。需一台公网服务器。</p>
+  </div>
+  <div class="tag b">
+    <strong>方案 B · 内网穿透（临时）</strong>
+    <p class="muted">零服务器、本机直上公网。地址会过期。</p>
+  </div>
+</div>
+
+<h2>方案 A — 云服务器标准部署</h2>
+<div class="card">
+  <p><span class="must">① 必须：</span>一台云服务器（公网 IP、≥4GB 内存、≥20GB 磁盘、Docker 20.10+ 与 Compose V2）</p>
+  <label><input type="checkbox"> 已购买/准备好云服务器，能 SSH 登录</label>
+  <label><input type="checkbox"> 安全组/防火墙已放行 <code>80</code>（要 HTTPS 再放行 <code>443</code>）</label>
+  <label><input type="checkbox"> 已 <code>git clone</code> 仓库并 <code>cd AgentChat-main/docker</code></label>
+
+  <p><span class="must">② 必须：</span>编辑 <code>docker/.env</code>（已存在，勿 cp 覆盖）</p>
+  <label><input type="checkbox"> <code>DASHSCOPE_API_KEY=</code> 已填真实 Key（空着 deploy.sh 会中止）</label>
+  <label><input type="checkbox"> <code>MYSQL_ROOT_PASSWORD</code> / <code>MINIO_ROOT_PASSWORD</code> 已设强口令（非 123456 / minioadmin；留空会自动生成）</label>
+  <label><input type="checkbox"> 其余模型/工具 Key（DeepSeek、高德、Tavily…）按需填；微信/Langfuse/OSS 可选</label>
+
+  <p><span class="must">③ 必须（建议）：</span>域名 + HTTPS</p>
+  <label><input type="checkbox"> 在 <code>nginx/nginx.prod.conf</code> 把 <code>server_name _</code> 改为域名，并加 443 + 证书（或前面套 Cloudflare 终止 TLS）</label>
+  <label><input type="checkbox"> 提交前端域名到 <code>CORS_ALLOW_ORIGINS</code>（同源部署可留空）</label>
+</div>
+
+<div class="step"># 在服务器上执行
+cd AgentChat-main/docker
+nano .env            # 填 DASHSCOPE_API_KEY 与强口令
+./deploy.sh          # 预检→生成密钥→渲染配置→构建→启动→验收
+./deploy.sh --verify # 只验收不重部署
+./deploy.sh --down   # 停服（保留数据卷）</div>
+
+<div class="warn"><strong>方案 A 必知坑：</strong>
+① 冷启动首字延迟可达 ~90 秒（重资源懒初始化），部署完务必先用一个账号发一条消息"预热"；
+② 首次启动后端要初始化数据库，若 5 个容器未全起，看 <code>docker compose -f docker-compose.prod.yml logs</code>；
+③ 容器数据卷名为 <code>agentchat-prod</code>，与开发版隔离，勿混用。</div>
+
+<h2>方案 B — 内网穿透隧道（本机）</h2>
+<div class="card">
+  <p><span class="must">① 必须：</span>本机服务已跑起来</p>
+  <label><input type="checkbox"> <code>cd AgentChat-main/docker && docker compose up -d</code> 已执行</label>
+  <label><input type="checkbox"> <code>http://127.0.0.1:8090</code> 有响应（start_tunnel.sh 会自检）</label>
+
+  <p><span class="must">② 必须：</span>能出网 + 有 ssh 客户端</p>
+  <label><input type="checkbox"> 系统自带 OpenSSH（Windows 10+ 默认可用）</label>
+  <label><input type="checkbox"> 接受地址过期：serveo ~10–30 分钟 / pinggy 60 分钟（脚本自动重连换地址）</label>
+  <label><input type="checkbox"> 若要固定地址：去 serveo 控制台登记 SSH 公钥，用 <code>SUBDOMAIN=xxx ./start_tunnel.sh</code></label>
+</div>
+
+<div class="step"># 在本机执行
+cd AgentChat-main/docker
+docker compose up -d
+./start_tunnel.sh            # serveo（默认）
+./start_tunnel.sh pinggy     # 或 pinggy
+# 公网地址打印并写入 tunnel_url.txt</div>
+
+<hr>
+<p class="muted">验收口径（deploy.sh 已内置）：前端首页 200、<code>/healthz</code> 200、<code>/api/v1/dialog/list</code> 返回 401/403（说明反代贯通且鉴权生效）、<code>/minio/agentchat/</code> 可达。</p>
+</div>
+</body>
+</html>
