@@ -1,0 +1,73 @@
+# =============================================================================
+# AgentChat 前端 · 生产镜像（多阶段构建）
+#
+# 开发版 docker/Dockerfile.frontend 运行的是 `npm run dev`（Vite 开发服务器），
+# 存在三个生产环境不可接受的问题：
+#   1. 性能差：不做代码分割/压缩/摇树优化，首屏加载慢
+#   2. 不安全：暴露源码与 sourcemap，且 Vite 有 Host 头校验等开发特性
+#   3. 不稳定：dev server 面向开发，不适合长期对外服务
+#
+# 本文件改为：
+#   Stage 1  用 Node 构建静态产物 dist/
+#   Stage 2  用 Nginx 托管 dist/，并反代 /api 与 /minio
+#
+# 最终镜像约 60MB（Nginx alpine + 静态文件）
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 全局 ARG：基础镜像可经 --build-arg 覆盖。
+#
+# ⚠️ 用于 FROM 的 ARG 必须声明在【第一个 FROM 之前】的全局作用域。
+#    若声明在某个 stage 内部，会退化为该 stage 的局部变量，无法用于后续 FROM，
+#    构建时报错：base name (${XXX_BASE}) should not be blank。
+#
+# 中国大陆网络下 Docker Hub 常不可达，可改用镜像源：
+#   --build-arg NODE_BASE=docker.m.daocloud.io/library/node:20-alpine
+#   --build-arg NGINX_BASE=docker.m.daocloud.io/library/nginx:1.27-alpine
+# ---------------------------------------------------------------------------
+ARG NODE_BASE=node:20-alpine
+ARG NGINX_BASE=nginx:1.27-alpine
+
+# ============================ Stage 1: builder ==============================
+FROM ${NODE_BASE} AS builder
+
+WORKDIR /app
+
+# 国内 npm 源加速
+RUN npm config set registry https://registry.npmmirror.com
+
+COPY src/frontend/package*.json ./
+RUN npm ci --registry=https://registry.npmmirror.com --no-audit --progress=false
+
+COPY src/frontend/ .
+
+# 关键：VITE_API_BASE_URL 留空 → 前端走相对路径请求（/api/...），
+# 由 Nginx 反向代理转发到后端。这样镜像与部署域名解耦，
+# 换域名/换 IP 都无需重新构建。
+ENV VITE_API_BASE_URL=""
+
+RUN npm run build
+
+# ============================ Stage 2: runtime ==============================
+FROM ${NGINX_BASE} AS runtime
+
+# 时区
+RUN apk add --no-cache tzdata curl && \
+    cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+    echo "Asia/Shanghai" > /etc/timezone
+
+# 移除默认站点配置，使用我们自己的
+RUN rm -f /etc/nginx/conf.d/default.conf
+
+# 生产 Nginx 配置（含 /api、/minio 反代与 SSE 必需设置）
+COPY docker/nginx/nginx.prod.conf /etc/nginx/conf.d/agentchat.conf
+
+# 静态产物
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -fsS http://127.0.0.1/healthz >/dev/null || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]

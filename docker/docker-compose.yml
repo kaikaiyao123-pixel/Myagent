@@ -1,0 +1,152 @@
+
+# 🌐 网络配置
+networks:
+  agentchat-network:
+    driver: bridge
+
+services:
+  # MySQL数据库服务
+  mysql:
+    container_name: agentchat-mysql
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: 123456
+      MYSQL_DATABASE: agentchat
+      MYSQL_USER: agentchat_user
+      MYSQL_PASSWORD: 123456
+      TZ: Asia/Shanghai
+    ports:
+      # 仅绑定回环地址：公网部署时中间件绝不能暴露到公网
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/init:/docker-entrypoint-initdb.d
+    networks:
+      - agentchat-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  # Redis缓存服务
+  redis:
+    image: redis:7.0-alpine
+    container_name: agentchat-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - redis_data:/data
+    networks:
+      - agentchat-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 后端API服务
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: agentchat-backend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:7860:7860"
+    environment:
+      TZ: Asia/Shanghai
+      # JWT 签名密钥由 docker/.env 注入（该文件不入库）。
+      # 原代码硬编码为 'secret'，公网暴露下可被伪造 token。
+      AUTHJWT_SECRET_KEY: ${AUTHJWT_SECRET_KEY:?AUTHJWT_SECRET_KEY 未设置，请在 docker/.env 中配置}
+    volumes:
+      # 持久化向量库：代码中使用相对路径（CWD=/app）
+      #   - memory_db : 长期记忆向量库 services/memory/vector_stores/chroma.py
+      #   - vector_db : 知识库向量库 services/rag/vector_stores/chroma.py
+      # 若不挂载，容器重建（docker compose up --build）会清空全部记忆与知识库索引。
+      - backend_memory_db:/app/memory_db
+      - backend_vector_db:/app/vector_db
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - agentchat-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 前端开发服务
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+    container_name: agentchat-frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:8090"
+    environment:
+      NODE_ENV: development
+      # 必须留空：apis/lingseek.ts 与 apis/workspace.ts 会直接读取该变量拼接请求地址
+      # （含 SSE 流）。若设为 http://localhost:7860，公网访问者的浏览器会去请求
+      # 其自身的 localhost，导致这些接口全部失败。留空即走相对路径，由 Vite 代理转发。
+      VITE_API_BASE_URL: ""
+      VITE_PROXY_TARGET: http://agentchat-backend:7860
+      VITE_MINIO_TARGET: http://minio:9000
+      TZ: Asia/Shanghai
+#    volumes:
+#      - ../src/frontend:/app:cached
+#      - /app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - agentchat-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  minio:
+    container_name: agentchat-minio
+    image: quay.io/minio/minio:RELEASE.2023-03-20T20-16-18Z
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/data/minio_data:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    restart: on-failure
+    networks:
+      - agentchat-network
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+# 数据卷配置
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+  backend_memory_db:
+    driver: local
+  backend_vector_db:
+    driver: local
+
+
+

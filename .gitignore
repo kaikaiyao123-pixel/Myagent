@@ -1,0 +1,60 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.uv-cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---------- 前端 ----------
+node_modules/
+dist/
+build/
+.vite/
+*.tsbuildinfo
+
+# ---------- IDE / 编辑器 ----------
+.idea/
+.vscode/
+*.swp
+
+# ---------- 环境变量 ----------
+.env
+.env.*
+# 例外：环境变量「模板」不含真实值，需要入库供部署参考
+!.env.prod.example
+!docker/.env.prod.example
+
+# ---------- 本地运行时数据（不入库）----------
+logs/
+chroma_db/
+memory_db/
+vector_db/
+docker/data/
+chat.html
+
+# 公网隧道运行时产物（地址每次重建都变，仅本机有效）
+docker/tunnel_url.txt
+docker/tunnel*.log
+
+# ---------- 含真实凭据的配置：本地保留，禁止入库 ----------
+docker/docker_config.yaml
+docker/.env
+src/backend/agentchat/config.yaml
+scripts/kb_token.txt
+# 由 deploy.sh 渲染出的生产配置（内含真实口令与 API Key）
+docker/docker_config.prod.generated.yaml
+
+# 部署/加固前的配置备份（含密钥与真实口令）
+*.bak
+*.bak-*
+
+# 验证脚本运行时产生的临时探针文件
+docker/.probe_*
+docker/.deploy_probe.*
+docker/build*.log
+docker/*.tmp

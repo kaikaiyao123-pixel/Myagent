@@ -1,0 +1,39 @@
+# =============================================================================
+# 本机预览生产栈（可选）
+#
+# 用途：在自己的机器上以「生产镜像 + 生产 Nginx + 生产编排」跑一遍，
+#       在真正买服务器之前先确认产物无误。
+#
+# 与开发栈（docker-compose.yml）的隔离手段：
+#   1. 顶层项目名 agentchat-prod（定义在 docker-compose.prod.yml 中）
+#      → 数据卷、网络均独立，不会复用也不会污染开发环境的数据
+#   2. 固定 container_name，便于用 docker exec / docker logs 直接操作
+#   3. 前端端口 80 → 8080。多数机器上 80 已被占用
+#      （Windows 上常见为系统进程 PID 4；Linux 上可能是已装的 nginx），
+#      改到 8080 可避免冲突。
+#
+# 用法：
+#   docker compose -f docker-compose.prod.yml -f docker-compose.local.yml up -d
+#   浏览器打开 http://127.0.0.1:8080
+#
+# 停止：
+#   docker compose -f docker-compose.prod.yml -f docker-compose.local.yml down
+#   （加 -v 会连同数据卷一起删除，谨慎使用）
+# =============================================================================
+
+services:
+  mysql:
+    container_name: agentchat-prod-mysql
+  redis:
+    container_name: agentchat-prod-redis
+  minio:
+    container_name: agentchat-prod-minio
+  backend:
+    container_name: agentchat-prod-backend
+  frontend:
+    container_name: agentchat-prod-frontend
+    # ⚠️ compose 对 ports 是【合并】语义（追加而非替换）。
+    #    要真正替换必须用 !override 标签（需 Docker Compose 2.24+），
+    #    否则会同时出现 80:80 与 8080:80，且 80 仍会抢占宿主机端口。
+    ports: !override
+      - "8080:80"

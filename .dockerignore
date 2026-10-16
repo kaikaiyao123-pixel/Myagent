@@ -1,0 +1,35 @@
+# 构建上下文排除规则（构建上下文 = 项目根目录，即 docker-compose.yml 的上级）
+
+# ⚠️ 必须排除宿主机虚拟环境：
+#    否则 Dockerfile 中的 `COPY src/backend/ ./` 会把宿主机的 .venv
+#    （Windows 布局 Lib/ + Scripts/）覆盖到容器内由 `uv sync` 生成的
+#    Linux 版 .venv（lib/ + bin/）之上，造成镜像体积膨胀与潜在依赖冲突。
+src/backend/.venv/
+src/backend/.uv-cache/
+src/backend/agentchat.egg-info/
+src/backend/**/__pycache__/
+src/backend/**/*.pyc
+src/backend/.pytest_cache/
+src/backend/.ruff_cache/
+src/backend/.mypy_cache/
+src/backend/logs/
+
+# 前端
+src/frontend/node_modules/
+src/frontend/.pnpm/
+src/frontend/.npm/
+src/frontend/.yarn/
+src/frontend/pnpm-lock.yaml
+src/frontend/yarn.lock
+src/frontend/dist/
+src/frontend/.env*
+
+# 运行时数据与版本控制
+docker/data/
+.git/
+.gitignore
+logs/
+
+# IDE
+.idea/
+.vscode/

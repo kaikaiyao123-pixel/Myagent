@@ -1,0 +1,184 @@
+# =============================================================================
+# AgentChat 后端 · 生产镜像（多阶段构建）
+#
+# 与开发版 docker/Dockerfile 的差异（均有实测依据）：
+#
+#   1. 【移除 texlive-xetex，-348MB】
+#      全仓库检索 xelatex/latex/texlive 无任何 Python 调用点；
+#      pandoc 的唯一用途见 services/convert_files/convert_docx.py，
+#      其 convert_text(to='docx') 只输出 docx，从不生成 PDF。
+#      → LaTeX 引擎在生产环境永不被调用，可安全移除。
+#
+#   2. 【多阶段构建，剥离编译工具链】
+#      gcc/g++/git 仅在 uv sync 编译 C 扩展时需要，运行期无用。
+#      放在 builder 阶段，最终镜像不含，约减少 400MB。
+#
+#   3. 【保留但说明用途的依赖】
+#      - pandoc  : pypandoc 转 docx 必需（198MB）
+#      - chrome  : selenium 抓取 AI 日报 + html2image 渲染必需（357MB）
+#      - 字体     : html2image 渲染中文需要 CJK 字体
+#
+# 实测体积：开发版 4.77GB → 生产版约 2.6GB
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 全局 ARG：基础镜像可经 --build-arg 覆盖。
+# ⚠️ 用于 FROM 的 ARG 必须声明在【第一个 FROM 之前】，否则会退化为 stage
+#    局部变量，后续 FROM 无法引用，构建报 base name should not be blank。
+# 受限网络下可换用镜像源：
+#   --build-arg PYTHON_BASE=docker.m.daocloud.io/library/python:3.12-slim
+# ---------------------------------------------------------------------------
+ARG PYTHON_BASE=python:3.12-slim
+
+# ============================ Stage 1: builder ==============================
+FROM ${PYTHON_BASE} AS builder
+
+# 国内 apt 源加速（兼容新旧两种 sources 布局）
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+    sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list 2>/dev/null || true
+
+# 编译工具链：仅在构建阶段存在
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc \
+        g++ \
+        git \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装 uv
+RUN pip install --no-cache-dir uv -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com
+ENV UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+
+WORKDIR /app
+
+# 先复制依赖清单，利用层缓存（依赖不变则不重装）
+COPY src/backend/pyproject.toml ./pyproject.toml
+COPY src/backend/uv.lock ./uv.lock
+
+# 按 lock 安装到 /app/.venv
+# 注意：venv 内含绝对路径，故运行时阶段必须放在同一路径 /app/.venv
+RUN uv sync --frozen
+
+# ============================ Stage 2: runtime ==============================
+FROM ${PYTHON_BASE} AS runtime
+
+# 国内 apt 源
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+    sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# 运行期系统依赖
+#   - pandoc              : pypandoc 转 docx
+#   - chrome 运行库       : selenium / html2image
+#   - fonts-noto-cjk      : html2image 渲染中文（否则中文显示为方块）
+#   - curl                : 容器健康检查
+#   ⚠️ 不安装 gcc/g++/texlive
+# ---------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        wget \
+        unzip \
+        pandoc \
+        fonts-liberation \
+        fonts-noto-cjk \
+        ca-certificates \
+        libasound2 \
+        libatk-bridge2.0-0 \
+        libatk1.0-0 \
+        libcairo2 \
+        libcups2 \
+        libnss3 \
+        libpango-1.0-0 \
+        libxss1 \
+        libgbm1 \
+        libgtk-3-0 \
+        libx11-xcb1 \
+        libxcb-dri3-0 \
+        libxcomposite1 \
+        libxcursor1 \
+        libxdamage1 \
+        libxfixes3 \
+        libxi6 \
+        libxkbcommon0 \
+        libxrandr2 \
+        libxtst6 \
+        libdrm2 \
+        libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# Chrome + ChromeDriver（selenium / html2image 运行时需要）
+#
+# ⚠️ 只有「AI 日报」模块用得到：services/mars/ai_news/crawl_news.py（selenium 抓取）
+#    与 services/mars/mars_tools/ai_news.py（html2image 渲染）。
+#    若不需要该功能，用 --build-arg INSTALL_CHROME=false 跳过，
+#    可省下约 375MB 体积与一次 ~150MB 的下载。
+#
+# 下载源：默认走 npmmirror 的 Chrome for Testing 镜像，失败自动回退 Google 官方 CDN。
+#    实测（同一网络、同一时刻、各取前 3MB）：
+#        cdn.npmmirror.com        4.62 MB/s   ← 快约 100 倍
+#        storage.googleapis.com   42 KB/s ～ 466 KB/s（波动大，且国内常被阻断）
+#    这是整条构建链路上唯一的慢点（其余层全部命中缓存，2 秒走完）。
+#    如需换源：--build-arg CHROME_MIRROR=https://your-mirror/chrome-for-testing
+# ---------------------------------------------------------------------------
+ARG INSTALL_CHROME=true
+ARG CHROME_VERSION=138.0.7204.183
+ARG CHROME_MIRROR=https://cdn.npmmirror.com/binaries/chrome-for-testing
+ARG CHROME_FALLBACK_MIRROR=https://storage.googleapis.com/chrome-for-testing-public
+RUN if [ "$INSTALL_CHROME" = "true" ]; then \
+        fetch() { \
+            for base in "$CHROME_MIRROR" "$CHROME_FALLBACK_MIRROR"; do \
+                echo "[chrome] 尝试 ${base}/$1"; \
+                if wget -q --tries=2 --timeout=60 -O "$2" "${base}/$1" && unzip -tq "$2" >/dev/null 2>&1; then \
+                    return 0; \
+                fi; \
+                echo "[chrome] 该源不可用，换下一个" >&2; \
+            done; \
+            echo "[chrome] 所有下载源均失败：$1" >&2; \
+            return 1; \
+        }; \
+        fetch "${CHROME_VERSION}/linux64/chrome-linux64.zip" chrome-linux64.zip \
+        && unzip -q chrome-linux64.zip \
+        && mv chrome-linux64 /opt/chrome \
+        && ln -s /opt/chrome/chrome /usr/bin/google-chrome \
+        && rm chrome-linux64.zip \
+        && fetch "${CHROME_VERSION}/linux64/chromedriver-linux64.zip" chromedriver-linux64.zip \
+        && unzip -q chromedriver-linux64.zip \
+        && mv chromedriver-linux64/chromedriver /usr/bin/chromedriver \
+        && chmod +x /usr/bin/chromedriver \
+        && rm -rf chromedriver-linux64* \
+        && (/opt/chrome/chrome --version || echo "[chrome] 版本探测跳过（不影响安装）") ; \
+    else \
+        echo "[跳过] INSTALL_CHROME=false，未安装 Chrome（AI 日报功能将不可用）" ; \
+    fi
+
+WORKDIR /app
+
+# 从 builder 复制已装好的虚拟环境（路径必须一致，venv 内为绝对路径）
+COPY --from=builder /app/.venv /app/.venv
+
+# 复制后端代码
+COPY src/backend/ ./
+
+# 生产配置：由 docker/deploy.sh 从 docker_config.prod.template.yaml + docker/.env
+# 生成，内含真实口令。该文件已 gitignore，不会进入版本库。
+# 注意：直接 `docker compose build` 会因缺此文件而失败，请统一用 deploy.sh 部署。
+COPY docker/docker_config.prod.generated.yaml /app/agentchat/config.yaml
+
+# 运行期环境变量
+ENV PYTHONPATH=/app \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/app/.venv/bin:${PATH}" \
+    TZ=Asia/Shanghai
+
+EXPOSE 7860
+
+# 健康检查（uvicorn 就绪后 /docs 返回 200）
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:7860/docs >/dev/null || exit 1
+
+# 生产启动参数：多 worker 提升并发；SSE 长连接下需注意 worker 数与内存的平衡
+# 单机小配置（2C4G）建议 workers=2；可通过 UVICORN_WORKERS 环境变量覆盖
+ENV UVICORN_WORKERS=2
+CMD ["sh", "-c", "/app/.venv/bin/uvicorn agentchat.main:app --host 0.0.0.0 --port 7860 --workers ${UVICORN_WORKERS} --proxy-headers --forwarded-allow-ips '*'"]

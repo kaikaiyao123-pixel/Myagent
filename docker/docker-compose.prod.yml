@@ -1,0 +1,199 @@
+# =============================================================================
+# AgentChat 生产环境编排
+#
+# 与开发版 docker-compose.yml 的关键差异：
+#
+#   1. 【端口暴露】只有 frontend(Nginx) 映射到宿主机 80/443。
+#      MySQL / Redis / MinIO / backend 全部只走内部网络，宿主机与公网均不可见。
+#      开发版虽然已收敛到 127.0.0.1，但仍占用宿主机端口，生产无需如此。
+#
+#   2. 【前端形态】用 Dockerfile.frontend.prod 多阶段构建的 Nginx 静态站点，
+#      替代开发版的 Vite dev server。
+#
+#   3. 【口令强度】所有口令由 docker/.env 注入，未设置则启动失败（:? 语法），
+#      杜绝"忘记改弱口令就上线"。
+#
+#   4. 【日志轮转】限制单文件大小与数量，防止长期运行写满磁盘。
+#
+#   5. 【CORS 收紧】通过 CORS_ALLOW_ORIGINS 显式指定，而非放行 '*'。
+#
+#   6. 【独立项目名】避免与开发编排（docker-compose.yml）共用数据卷。
+#      若不指定，两者项目名都取自目录名 "docker"，卷名相同 →
+#      生产编排会复用开发环境的数据库卷；而 MySQL 的 MYSQL_ROOT_PASSWORD
+#      仅在【数据目录为空时】生效，于是生产后端会用新口令去连旧库，直接连不上。
+#
+# 启动：
+#   cd docker && docker compose -f docker-compose.prod.yml up -d --build
+# =============================================================================
+
+name: agentchat-prod
+
+networks:
+  agentchat-network:
+    driver: bridge
+
+services:
+  # ---------------------------------------------------------------------------
+  # MySQL：仅内网，不映射宿主机端口
+  # ---------------------------------------------------------------------------
+  mysql:
+    container_name: agentchat-mysql
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置，请在 docker/.env 中配置}
+      MYSQL_DATABASE: agentchat
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - agentchat-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 15s
+      timeout: 20s
+      retries: 10
+      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # ---------------------------------------------------------------------------
+  # Redis：仅内网
+  # ---------------------------------------------------------------------------
+  redis:
+    container_name: agentchat-redis
+    image: redis:7.0-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - redis_data:/data
+    networks:
+      - agentchat-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # MinIO 对象存储：仅内网
+  # ---------------------------------------------------------------------------
+  minio:
+    container_name: agentchat-minio
+    image: quay.io/minio/minio:RELEASE.2023-03-20T20-16-18Z
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER 未设置，请在 docker/.env 中配置}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD 未设置，请在 docker/.env 中配置}
+      TZ: Asia/Shanghai
+    volumes:
+      - minio_data:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    networks:
+      - agentchat-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # 后端 API：仅内网，由 Nginx 反代
+  # ---------------------------------------------------------------------------
+  backend:
+    container_name: agentchat-backend
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.prod
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      # JWT 签名密钥（原代码硬编码 'secret'，可被伪造 token）
+      AUTHJWT_SECRET_KEY: ${AUTHJWT_SECRET_KEY:?AUTHJWT_SECRET_KEY 未设置，请在 docker/.env 中配置}
+      # CORS：同源部署下无需放行任何来源；如需跨域请显式列出
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-}
+      # uvicorn worker 数：2C4G 建议 2，4C8G 可设 4
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
+    volumes:
+      # 生产配置以「挂载」方式提供，而非只依赖镜像内的 COPY。
+      # 原因：配置内含 API Key、口令等会变动的值。若固化在镜像里，
+      # 每次改一个 Key 都要重新构建镜像（uv sync + Chrome 下载，可能十几分钟）。
+      # 挂载后只需 `docker compose restart backend` 即可生效。
+      #
+      # ⚠️ 该文件由 docker/deploy.sh 生成，必须先存在再启动容器；
+      #    若路径不存在，Docker 会在宿主机【创建一个同名目录】并挂进去，
+      #    应用读取配置时会失败且报错难以理解。
+      - ./docker_config.prod.generated.yaml:/app/agentchat/config.yaml:ro
+      # 向量库持久化：不挂载则容器重建会清空全部长期记忆与知识库索引
+      - backend_memory_db:/app/memory_db
+      - backend_vector_db:/app/vector_db
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - agentchat-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # ---------------------------------------------------------------------------
+  # 前端 Nginx：静态站点 + /api 反代 + /minio 反代
+  # 唯一对外暴露的服务
+  # ---------------------------------------------------------------------------
+  frontend:
+    container_name: agentchat-frontend
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend.prod
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      # 绑定域名并配置 HTTPS 后，取消下面注释并把 80 改为跳转
+      # - "443:443"
+    environment:
+      TZ: Asia/Shanghai
+    depends_on:
+      - backend
+      - minio
+    networks:
+      - agentchat-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+  minio_data:
+    driver: local
+  backend_memory_db:
+    driver: local
+  backend_vector_db:
+    driver: local

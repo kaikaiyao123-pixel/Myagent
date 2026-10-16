@@ -1,0 +1,159 @@
+# =============================================================================
+# AgentChat 生产配置模板
+#
+# ⚠️ 不要直接编辑本文件用于部署。它是模板，由 docker/deploy.sh 在部署时
+#    读取 docker/.env 并替换其中形如「双下划线 + 大写变量名 + 双下划线」的占位符，
+#    生成 docker_config.prod.generated.yaml。
+#
+# 所有敏感值统一放在 docker/.env（已 gitignore），本模板可安全提交到仓库。
+# =============================================================================
+
+server:
+  env: "prod"                  # 生产环境（影响日志级别、错误详情暴露等）
+  host: "0.0.0.0"
+  port: 7860
+  name: "AgentChat"
+  version: "2.5.0"
+
+# ---------------------------------------------------------------------------
+# 数据库：口令由 .env 的 MYSQL_PASSWORD 注入
+# ---------------------------------------------------------------------------
+mysql:
+  endpoint: "mysql+pymysql://root:__MYSQL_PASSWORD__@mysql:3306/agentchat"
+  async_endpoint: "mysql+aiomysql://root:__MYSQL_PASSWORD__@mysql:3306/agentchat"
+
+redis:
+  endpoint: "redis://redis:6379"
+
+# ---------------------------------------------------------------------------
+# 模型服务：API Key 由 .env 注入，模型名可按需修改
+# ---------------------------------------------------------------------------
+multi_models:
+  conversation_model:
+    api_key: "__DASHSCOPE_API_KEY__"
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    model_name: "qwen-plus"
+
+  tool_call_model:
+    api_key: "__DASHSCOPE_API_KEY__"
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    model_name: "qwen-plus"
+
+  reasoning_model:
+    api_key: "__DEEPSEEK_API_KEY__"
+    base_url: "https://api.deepseek.com/v1"
+    model_name: "deepseek-reasoner"
+
+  text2image:
+    api_key: "__DASHSCOPE_API_KEY__"
+    base_url: "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis"
+    model_name: "wanx2.0-t2i-turbo"
+
+  qwen_vl:
+    api_key: "__DASHSCOPE_API_KEY__"
+    # 注意：此处必须是合法 URL，结尾不可有多余引号
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    model_name: "qwen-vl-plus"
+
+  embedding:
+    api_key: "__DASHSCOPE_API_KEY__"
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    model_name: "text-embedding-v4"
+
+  rerank:
+    api_key: "__DASHSCOPE_API_KEY__"
+    base_url: "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+    model_name: "gte-rerank-v2"
+
+# ---------------------------------------------------------------------------
+# 外部工具
+# ---------------------------------------------------------------------------
+tools:
+  weather:
+    api_key: "__AMAP_API_KEY__"
+    endpoint: "https://restapi.amap.com/v3/weather/weatherInfo?parameters"
+  tavily:
+    api_key: "__TAVILY_API_KEY__"
+  google:
+    api_key: "__SERPAPI_KEY__"
+  delivery:
+    api_key: "__DELIVERY_API_KEY__"
+    endpoint: "https://qyexpress.market.alicloudapi.com/composite/queryexpress"
+  bocha:
+    api_key: "__BOCHA_API_KEY__"
+    endpoint: "https://api.bochaai.com/v1/web-search"
+
+# ---------------------------------------------------------------------------
+# RAG
+# ---------------------------------------------------------------------------
+rag:
+  enable_summary: False
+  enable_elasticsearch: False
+  enable_ik_analyzer: False
+  retrival:
+    top_k: 5
+    min_score: 0.2
+  split:
+    chunk_size: 500
+    overlap_size: 100
+  elasticsearch:
+    hosts: "http://127.0.0.1:9200"
+  vector_db:
+    host: "127.0.0.1"
+    port: "19530"
+    mode: "chroma"
+
+# ---------------------------------------------------------------------------
+# 对象存储：MinIO 凭据由 .env 注入
+# ---------------------------------------------------------------------------
+storage:
+  mode: "minio"
+  oss:
+    access_key_id: "__OSS_ACCESS_KEY_ID__"
+    access_key_secret: "__OSS_ACCESS_KEY_SECRET__"
+    endpoint: "oss-cn-beijing.aliyuncs.com"
+    bucket_name: "agentchat"
+    base_url: "https://agentchat.oss-cn-beijing.aliyuncs.com"
+  minio:
+    access_key_id: "__MINIO_ROOT_USER__"
+    access_key_secret: "__MINIO_ROOT_PASSWORD__"
+    endpoint: "minio:9000"
+    bucket_name: "agentchat"
+    # 相对路径：由 Nginx 的 /minio/ 反代转发到 MinIO。
+    # 与访问域名解耦 —— 换 IP 或绑定域名都无需改配置。
+    base_url: "/minio/agentchat"
+
+# ---------------------------------------------------------------------------
+# 默认资源
+# ---------------------------------------------------------------------------
+default_config:
+  mcp_logo_url: "https://agentchat.oss-cn-beijing.aliyuncs.com/icons/mcp/mcp.png"
+  tool_logo_url: "https://agentchat.oss-cn-beijing.aliyuncs.com/icons/tools/default.png"
+  agent_logo_url: "https://agentchat.oss-cn-beijing.aliyuncs.com/icons/tools/bot.png"
+  mars_daily_url: "https://news.aibase.com/zh/news"
+  memory_collection_name: "memory"
+
+# ---------------------------------------------------------------------------
+# 微信（可选）
+# ---------------------------------------------------------------------------
+wechat_config:
+  token: "__WECHAT_TOKEN__"
+  app_id: "__WECHAT_APP_ID__"
+  secret: "__WECHAT_SECRET__"
+
+# ---------------------------------------------------------------------------
+# Langfuse 追踪（可选）
+# ---------------------------------------------------------------------------
+langfuse:
+  trace_name: "agentchat"
+  host: "https://cloud.langfuse.com"
+  public_key: "__LANGFUSE_PUBLIC_KEY__"
+  secret_key: "__LANGFUSE_SECRET_KEY__"
+  user_id: "agentchat"
+
+# ---------------------------------------------------------------------------
+# 接口白名单（免鉴权路径）
+# ⚠️ 安全提示：/api/v1/mcp/* 免鉴权，公网暴露时任何人可调用。
+#    若不需要对外提供 MCP 服务，建议改为空列表 []。
+# ---------------------------------------------------------------------------
+whitelist_paths: []
