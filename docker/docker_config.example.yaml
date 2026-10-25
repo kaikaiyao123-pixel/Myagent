@@ -143,13 +143,28 @@ wechat_config:
   app_id: "your-wechat-app-id"
   secret: "your-wechat-app-secret"
 
-# 追踪工具 Langfuse 配置 (目前版本可能未应用)
+# 追踪工具 Langfuse 配置
+# 默认关闭：enabled 置为 true 且填入真实公私钥后才开始上报；
+# 未装 langfuse 包 / 缺 Key / 初始化失败都会静默降级，不影响主链路。
 langfuse:
+  enabled: false
   trace_name: "agentchat"
   host: "https://cloud.langfuse.com"
   public_key: "your-langfuse-public-key" # Langfuse 公钥
   secret_key: "your-langfuse-secret-key" # Langfuse 私钥
   user_id: "your-user-id" # 用户 ID
+  trace_chat: true # 是否建立对话级 trace 根（模型调用级埋点不受此开关影响）
+
+# 语义缓存（默认关闭）
+# 仅缓存「单轮、自包含」的知识库问答：无附件 + 未开长期记忆 + 会话首轮才走缓存。
+# threshold 必须先用 scripts/calibrate_threshold.py 在真实问答对上标定再启用 ——
+# 未标定就开会把 A 问题的答案误返回给 B 问题，且用户无从察觉。
+# kb_version 在知识库内容发生变更时手动 +1，旧答案即整体失效。
+semantic_cache:
+  enabled: false
+  threshold: 0.90
+  ttl: 86400
+  kb_version: "v1"
 
 # 接口白名单路径
 whitelist_paths: ["/api/v1/mcp/*"]

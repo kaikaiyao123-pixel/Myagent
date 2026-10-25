@@ -37,6 +37,9 @@ vector_db/
 docker/data/
 chat.html
 
+# 本地 docker save 导出的镜像包（体积 GB 级，禁止入库）
+*.tar
+
 # 公网隧道运行时产物（地址每次重建都变，仅本机有效）
 docker/tunnel_url.txt
 docker/tunnel*.log

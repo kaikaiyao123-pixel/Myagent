@@ -1,0 +1,24 @@
+{"q": "你们的退款政策是什么？", "type": "kb_cite", "expect_contains": ["7天", "无理由"], "kb_version": "v1", "seed": true}
+{"q": "买东西要运费吗？", "type": "kb_cite", "expect_contains": ["包邮", "运费"], "kb_version": "v1", "seed": true}
+{"q": "可以开发票吗？", "type": "kb_cite", "expect_contains": ["发票"], "kb_version": "v1", "seed": true}
+{"q": "下单后还能修改订单吗？", "type": "kb_cite", "expect_contains": ["未发货", "修改"], "kb_version": "v1", "seed": true}
+{"q": "售后申请有效期是多久？", "type": "kb_cite", "expect_contains": ["售后"], "kb_version": "v1", "seed": true}
+{"q": "会员有什么权益？", "type": "kb_cite", "expect_contains": ["会员"], "kb_version": "v1", "seed": true}
+{"q": "忘记密码怎么办？", "type": "kb_cite", "expect_contains": ["密码"], "kb_version": "v1", "seed": true}
+{"q": "下单后多久发货？", "type": "kb_cite", "expect_contains": ["发货"], "kb_version": "v1", "seed": true}
+{"q": "退货流程怎么走？", "type": "kb_cite", "expect_contains": ["退货"], "kb_version": "v1", "seed": true}
+{"q": "优惠券可以叠加使用吗？", "type": "kb_cite", "expect_contains": ["优惠券"], "kb_version": "v1", "seed": true}
+{"q": "账号怎么注销？", "type": "kb_cite", "expect_contains": ["注销"], "kb_version": "v1", "seed": true}
+{"q": "你们怎么保护我的个人信息？", "type": "kb_cite", "expect_contains": ["个人信息"], "kb_version": "v1", "seed": true}
+{"q": "今天天气怎么样？", "type": "refuse", "expect_refuse": true, "seed": true}
+{"q": "现在黄金价格多少？", "type": "refuse", "expect_refuse": true, "seed": true}
+{"q": "帮我写一首关于春天的诗", "type": "refuse", "expect_refuse": true, "seed": true}
+{"q": "明天彩票中奖号码是多少？", "type": "refuse", "expect_refuse": true, "seed": true}
+{"q": "推荐几只最近能涨的股票", "type": "refuse", "expect_refuse": true, "seed": true}
+{"q": "特朗普是谁？", "type": "refuse", "expect_refuse": true, "seed": true}
+{"q": "北京今天天气如何？", "type": "tool", "expect_tool": "天气", "seed": true}
+{"q": "帮我搜一下最新的人工智能新闻", "type": "tool", "expect_tool": "搜索", "seed": true}
+{"q": "画一只橘猫", "type": "tool", "expect_tool": "图片", "seed": true}
+{"q": "查一下顺丰快递单号 SF123456789 的物流", "type": "tool", "expect_tool": "快递", "seed": true}
+{"q": "找几篇关于 Transformer 的论文", "type": "tool", "expect_tool": "论文", "seed": true}
+{"q": "给张三发一封邮件说明天开会", "type": "tool", "expect_tool": "邮件", "seed": true}

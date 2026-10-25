@@ -183,6 +183,50 @@ prepare_env() {
   fi
   [ -n "${DASHSCOPE_API_KEY:-}" ] || c_warn "已跳过模型 Key 检查（SKIP_LLM_KEY_CHECK=1），对话功能将不可用。"
 
+  # Langfuse 成对校验：只填一个 Key 是半配置，SDE 会反复 401 重试并污染日志；
+  # 两个都空视为「不启用可观测」，放行（可选组件不做硬拦截）。
+  if [ -n "${LANGFUSE_PUBLIC_KEY:-}" ] && [ -z "${LANGFUSE_SECRET_KEY:-}" ]; then
+    c_err "LANGFUSE_PUBLIC_KEY 已填但 LANGFUSE_SECRET_KEY 为空。"
+    c_err "  Langfuse 必须公私钥成对配置：请补全 $ENV_FILE 中的 LANGFUSE_SECRET_KEY，"
+    c_err "  或清空 LANGFUSE_PUBLIC_KEY 以关闭追踪。"
+    exit 1
+  fi
+  if [ -z "${LANGFUSE_PUBLIC_KEY:-}" ] && [ -n "${LANGFUSE_SECRET_KEY:-}" ]; then
+    c_err "LANGFUSE_SECRET_KEY 已填但 LANGFUSE_PUBLIC_KEY 为空。"
+    c_err "  Langfuse 必须公私钥成对配置：请补全 $ENV_FILE 中的 LANGFUSE_PUBLIC_KEY，"
+    c_err "  或清空 LANGFUSE_SECRET_KEY 以关闭追踪。"
+    exit 1
+  fi
+
+  # 语义缓存 env 覆盖项校验（未设置则渲染时用模板默认值）
+  if [ -n "${SEMANTIC_CACHE_ENABLED:-}" ]; then
+    case "${SEMANTIC_CACHE_ENABLED}" in
+      true|false) ;;
+      *) c_err "SEMANTIC_CACHE_ENABLED 只能是 true/false，当前为 '${SEMANTIC_CACHE_ENABLED}'。"; exit 1 ;;
+    esac
+  fi
+  if [ -n "${SEMANTIC_CACHE_THRESHOLD:-}" ]; then
+    case "${SEMANTIC_CACHE_THRESHOLD}" in
+      *[!0-9.]*|""|.*.|*.) c_err "SEMANTIC_CACHE_THRESHOLD 必须是数字，当前为 '${SEMANTIC_CACHE_THRESHOLD}'。"; exit 1 ;;
+    esac
+    awk -v v="${SEMANTIC_CACHE_THRESHOLD}" 'BEGIN { exit !(v > 0 && v < 1) }' || {
+      c_err "SEMANTIC_CACHE_THRESHOLD 必须在 (0, 1) 开区间，当前为 '${SEMANTIC_CACHE_THRESHOLD}'。"
+      c_err "  （1.0 会因浮点误差导致缓存永远不命中，请用 0.99 以下。）"
+      exit 1
+    }
+  fi
+  if [ -n "${SEMANTIC_CACHE_TTL:-}" ]; then
+    case "${SEMANTIC_CACHE_TTL}" in
+      *[!0-9]*|"") c_err "SEMANTIC_CACHE_TTL 必须是正整数（秒），当前为 '${SEMANTIC_CACHE_TTL}'。"; exit 1 ;;
+    esac
+    [ "${SEMANTIC_CACHE_TTL}" -gt 0 ] || { c_err "SEMANTIC_CACHE_TTL 必须 > 0。"; exit 1; }
+  fi
+  if [ -n "${SEMANTIC_CACHE_KB_VERSION:-}" ]; then
+    case "${SEMANTIC_CACHE_KB_VERSION}" in
+      *:*|*__*) c_err "SEMANTIC_CACHE_KB_VERSION 不能包含 ':'（Redis key 分隔符）或 '__'（与渲染占位符样式冲突）。"; exit 1 ;;
+    esac
+  fi
+
   [ "$changed" -eq 1 ] && c_ok "密钥已写入 $ENV_FILE（权限 600）"
   c_ok "环境变量校验通过"
 }
@@ -222,6 +266,15 @@ render_config() {
   . "./$ENV_FILE"
   set +a
 
+  # Langfuse 启用判定：公私钥成对非空才启用（半配置已在 prepare_env 拦截）。
+  # 可选组件默认关闭，不搞「半配置也硬启用」。
+  if [ -n "${LANGFUSE_PUBLIC_KEY:-}" ] && [ -n "${LANGFUSE_SECRET_KEY:-}" ]; then
+    LANGFUSE_ENABLED=true
+  else
+    LANGFUSE_ENABLED=false
+  fi
+  export LANGFUSE_ENABLED
+
   python3 - "$TEMPLATE" "$GENERATED" <<'PY'
 import os, sys, pathlib
 tpl_path, out_path = sys.argv[1], sys.argv[2]
@@ -245,6 +298,14 @@ mapping = {
     'LANGFUSE_SECRET_KEY':   os.getenv('LANGFUSE_SECRET_KEY', ''),
     'OSS_ACCESS_KEY_ID':     os.getenv('OSS_ACCESS_KEY_ID', ''),
     'OSS_ACCESS_KEY_SECRET': os.getenv('OSS_ACCESS_KEY_SECRET', ''),
+    # 可选项：env 未设置时用 or 默认值保留模板语义。
+    # 不能用 os.getenv(k, 'default') 之外的空串替换 —— 那会把可选配置清成空值。
+    'LANGFUSE_ENABLED':          os.getenv('LANGFUSE_ENABLED') or 'false',
+    'LANGFUSE_HOST':             os.getenv('LANGFUSE_HOST') or 'https://cloud.langfuse.com',
+    'SEMANTIC_CACHE_ENABLED':    os.getenv('SEMANTIC_CACHE_ENABLED') or 'false',
+    'SEMANTIC_CACHE_THRESHOLD':  os.getenv('SEMANTIC_CACHE_THRESHOLD') or '0.90',
+    'SEMANTIC_CACHE_TTL':        os.getenv('SEMANTIC_CACHE_TTL') or '86400',
+    'SEMANTIC_CACHE_KB_VERSION': os.getenv('SEMANTIC_CACHE_KB_VERSION') or 'v1',
 }
 
 # 长占位符优先替换，避免 __MINIO_ROOT_USER__ 被 __MINIO_ROOT__ 之类前缀误伤

@@ -91,6 +91,12 @@ jobs:
           import ast, pathlib
           targets = list(pathlib.Path("src/backend/agentchat/auth").glob("*.py"))
           targets += list(pathlib.Path("src/backend/agentchat/schemas").glob("*.py"))
+          # 三件套接入点：服务层 + completion + 模型调用中间件
+          targets += list(pathlib.Path("src/backend/agentchat/services").glob("*.py"))
+          targets += [
+              pathlib.Path("src/backend/agentchat/api/v1/completion.py"),
+              pathlib.Path("src/backend/agentchat/core/agents/general_agent.py"),
+          ]
           bad = 0
           for p in targets:
               try:
@@ -101,3 +107,22 @@ jobs:
           print(f"解析 {len(targets)} 个文件，失败 {bad} 个")
           raise SystemExit(1 if bad else 0)
           PY
+
+      # ------------------------------------------------------------------
+      # 三件套（稳健型：语义缓存 + Langfuse 埋点 + 评测 Harness）
+      # ------------------------------------------------------------------
+      - name: 三件套离线单测（numpy / requests / langfuse）
+        run: |
+          python3 -m pip install --quiet numpy requests langfuse
+          for t in test_semantic_cache test_semantic_cache_service \
+                   test_langfuse_trace test_integration_wiring test_eval_harness; do
+            echo "=== $t ==="
+            python3 "scripts/$t.py" || exit 1
+          done
+          echo "三件套离线单测全部通过"
+
+      - name: 评测 Harness 自测（mock server + 门禁反向验证）
+        run: python3 scripts/eval_harness.py --self-test
+
+      - name: 黄金集 schema 校验
+        run: python3 scripts/eval_harness.py --golden scripts/golden_set.jsonl --validate-only

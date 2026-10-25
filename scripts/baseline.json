@@ -1,0 +1,8 @@
+{
+  "pass_rate": 0.0,
+  "per_type": {},
+  "balanced_accuracy": null,
+  "updated_at": "2026-10-26",
+  "golden": "golden_set.jsonl",
+  "note": "占位基线：黄金集为 seed 示例（24 条通用 FAQ），尚未对真实环境跑过。pass_rate=0 意味着门禁暂不生效 —— 请在真实后端上运行 eval_harness.py --update-baseline 生成真实基线（只升不降）。"
+}

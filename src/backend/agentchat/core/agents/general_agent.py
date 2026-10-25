@@ -22,6 +22,8 @@ from agentchat.api.services.llm import LLMService
 from agentchat.core.models.manager import ModelManager
 from agentchat.api.services.tool import ToolService
 from agentchat.services.rag.handler import RagHandler
+from agentchat.services.semantic_cache import current_kb_version
+from agentchat.services.langfuse_trace import message_to_text, trace_generation
 from agentchat.core.agents.mcp_agent import MCPAgent, MCPConfig
 from agentchat.api.services.mcp_server import MCPService
 from agentchat.tools.openapi_tool.adapter import OpenAPIToolAdapter
@@ -35,6 +37,47 @@ class StreamAgentState(AgentState):
 
 
 MAX_TOOLS_SIZE = 10
+
+
+def _model_display_name(request) -> str:
+    """从 ModelRequest 尽力取出模型名（取不到回退空串，不阻断主流程）。"""
+    model = getattr(request, "model", None)
+    for attr in ("model_name", "model", "deployment_name"):
+        name = getattr(model, attr, None)
+        if isinstance(name, str) and name:
+            return name
+    return ""
+
+
+def _extract_usage(response) -> dict | None:
+    """从 ModelResponse 提取 token 用量（langchain usage_metadata，取不到返回 None）。"""
+    um = getattr(response, "usage_metadata", None)
+    if um is None:
+        return None
+
+    def _get(key):
+        if isinstance(um, dict):
+            return um.get(key)
+        return getattr(um, key, None)
+
+    inp, out = _get("input_tokens"), _get("output_tokens")
+    tot = _get("total_tokens")
+    if inp is None and out is None and tot is None:
+        return None
+    if tot is None:
+        tot = (inp or 0) + (out or 0)
+    return {"input": inp, "output": out, "total": tot}
+
+
+def _response_to_text(response) -> str:
+    """ModelResponse -> 可观测文本（截断 4000 字符）。"""
+    parts = []
+    for m in getattr(response, "result", None) or []:
+        content = getattr(m, "content", None)
+        if content:
+            parts.append(str(content))
+    text = "\n".join(parts)
+    return text[:4000] + ("…<截断>" if len(text) > 4000 else "")
 
 class AgentConfig(BaseModel):
     user_id: str
@@ -76,7 +119,28 @@ class EmitEventAgentMiddleware(AgentMiddleware):
         try:
             if available_tools := request.state.get("available_tools", []):
                 request.tools = available_tools
-            response = await handler(request)
+            # Langfuse generation 埋点（方案 4.3）。未启用/未装包时 trace_generation
+            # 直接 yield None，零开销；上报异常被 _SafeObservation 吞掉，不影响主链路。
+            with trace_generation(
+                name="llm_generate",
+                model=_model_display_name(request),
+                input=message_to_text(getattr(request, "messages", None)),
+                metadata={
+                    "user_id": request.state.get("user_id"),
+                    "kb_version": current_kb_version(),
+                },
+            ) as gen:
+                t0 = time.perf_counter()
+                response = await handler(request)
+                if gen is not None:
+                    gen.update(
+                        output=_response_to_text(response),
+                        model=_model_display_name(request),
+                        usage_details=_extract_usage(response),
+                        metadata={
+                            "total_ms": round((time.perf_counter() - t0) * 1000, 1),
+                        },
+                    )
             return response
         except Exception as err:
             logger.error(f"Model call error: {err}")

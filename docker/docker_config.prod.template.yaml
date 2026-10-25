@@ -146,14 +146,35 @@ wechat_config:
   secret: "__WECHAT_SECRET__"
 
 # ---------------------------------------------------------------------------
+# 语义缓存（可选，默认关闭）
+# 适用边界（方案 2.1）：只服务「单轮、自包含、答案可复现」的知识库问答 / FAQ；
+# 多轮个性化对话、实时数据查询不要走缓存。
+#   enabled   : 由 deploy.sh 按 .env 的 SEMANTIC_CACHE_ENABLED 渲染，默认 false。
+#               阈值未经校准时不要打开 —— 过高=没缓存，过低=答非所问（方案 8）。
+#   threshold : 余弦相似度阈值，必须用 scripts/calibrate_threshold.py 在校准集上
+#               标定后填写；1.0 会因浮点误差永远不命中，代码层直接拒绝。
+#   kb_version: 知识库版本。KB 更新后递增（v1 -> v2）即逻辑失效旧缓存（方案 2.6）。
+# ---------------------------------------------------------------------------
+semantic_cache:
+  enabled: __SEMANTIC_CACHE_ENABLED__
+  threshold: __SEMANTIC_CACHE_THRESHOLD__
+  ttl: __SEMANTIC_CACHE_TTL__
+  kb_version: "__SEMANTIC_CACHE_KB_VERSION__"
+
+# ---------------------------------------------------------------------------
 # Langfuse 追踪（可选）
+# enabled 由 deploy.sh 渲染：公私钥成对填写 -> true，任一为空 -> false。
+# 只填一个是半配置，prepare_env 会直接拦截（SDK 会反复 401 重试污染日志）。
+# host 默认 Langfuse Cloud；自托管时在 .env 设 LANGFUSE_HOST。
 # ---------------------------------------------------------------------------
 langfuse:
+  enabled: __LANGFUSE_ENABLED__
   trace_name: "agentchat"
-  host: "https://cloud.langfuse.com"
+  host: "__LANGFUSE_HOST__"
   public_key: "__LANGFUSE_PUBLIC_KEY__"
   secret_key: "__LANGFUSE_SECRET_KEY__"
   user_id: "agentchat"
+  trace_chat: true
 
 # ---------------------------------------------------------------------------
 # 接口白名单（免鉴权路径）

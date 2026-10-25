@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     redis: dict = {}
     mysql: dict = {}
     langfuse: dict = {}
+    # 语义缓存（方案 2.7）。必须声明字段：pydantic v1 的 BaseSettings
+    # 禁止 setattr 未声明字段，漏声明会让 init_app_settings 整体加载失败。
+    semantic_cache: dict = {}
     whitelist_paths: list = []
     wechat_config: dict = {}
     default_config: dict = {}
