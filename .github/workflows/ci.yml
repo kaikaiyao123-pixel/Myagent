@@ -1,0 +1,103 @@
+name: ci
+
+# 只做「不需要真实服务的静态校验」，目标是拦住三类低成本事故：
+#   1. 脚本语法/常见坑（shellcheck）
+#   2. YAML / compose 渲染错误（改一行缩进就起不来）
+#   3. Nginx 配置语法错误（要等部署后 nginx 起不来才发现）
+#   4. JWT 鉴权模块与 Pydantic 版本不兼容（会表现成容器启动即崩）
+#
+# 不构建镜像：完整构建含 Chrome 下载与 uv sync，耗时十几分钟，
+# 且需要访问外网镜像源，不适合放在每次 push 的必跑项里。
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  static-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
+
+      - name: ShellCheck（-S warning，按告警级别拦截）
+        run: |
+          shellcheck -S warning \
+            docker/deploy.sh \
+            docker/backup.sh \
+            docker/entrypoint.prod.sh \
+            docker/start_tunnel.sh
+
+      - name: Python 依赖（仅校验 JWT 兼容性所需，不装重型包）
+        run: |
+          python3 -m pip install --quiet --upgrade pip
+          python3 -m pip install --quiet \
+            "pydantic==2.12.5" "PyJWT==2.12.1" "fastapi==0.121.0" pyyaml
+
+      - name: YAML 语法
+        run: |
+          python3 - <<'PY'
+          import sys, yaml, pathlib
+          files = [
+              "docker/docker-compose.prod.yml",
+              "docker/docker-compose.yml",
+              "docker/docker_config.prod.template.yaml",
+              "docker/docker_config.example.yaml",
+              ".github/workflows/ci.yml",
+          ]
+          for f in files:
+              p = pathlib.Path(f)
+              if not p.exists():
+                  print(f"[skip] {f} 不存在")
+                  continue
+              list(yaml.safe_load_all(p.read_text(encoding="utf-8")))
+              print(f"[ok] {f}")
+          PY
+
+      - name: Compose 渲染校验
+        run: |
+          # compose 里用 ${VAR:?} 强制要求非空，这里注入 CI 专用假值。
+          # 写入的是 docker/.env（已 gitignore），不会污染仓库。
+          cat > docker/.env <<'EOF'
+          MYSQL_ROOT_PASSWORD=ci-only-not-a-real-secret
+          MINIO_ROOT_USER=agentchat
+          MINIO_ROOT_PASSWORD=ci-only-not-a-real-secret
+          AUTHJWT_SECRET_KEY=ci-only-not-a-real-secret
+          DASHSCOPE_API_KEY=ci-only
+          EOF
+          docker compose -f docker/docker-compose.prod.yml config --quiet
+          docker compose -f docker/docker-compose.prod.yml config | \
+            grep -q "host.docker.internal=host-gateway"
+          echo "compose 渲染通过（含 host.docker.internal 映射）"
+
+      - name: Nginx 配置语法（nginx -t）
+        run: |
+          # conf.d/*.conf 会被 nginx.conf 在 http{} 内 include，
+          # 因此 limit_req_zone 写在文件顶层是合法的 —— 这里一并验证该假设。
+          docker run --rm \
+            -v "$PWD/docker/nginx/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro" \
+            nginx:1.27-alpine nginx -t
+
+      - name: JWT 鉴权模块兼容性
+        run: python3 scripts/verify_jwt_auth_compat.py -v
+
+      - name: 后端语法解析（ast.parse，不产生 __pycache__）
+        run: |
+          python3 - <<'PY'
+          import ast, pathlib
+          targets = list(pathlib.Path("src/backend/agentchat/auth").glob("*.py"))
+          targets += list(pathlib.Path("src/backend/agentchat/schemas").glob("*.py"))
+          bad = 0
+          for p in targets:
+              try:
+                  ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
+              except SyntaxError as e:
+                  bad += 1
+                  print(f"[FAIL] {p}: {e}")
+          print(f"解析 {len(targets)} 个文件，失败 {bad} 个")
+          raise SystemExit(1 if bad else 0)
+          PY

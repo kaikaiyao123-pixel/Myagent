@@ -22,6 +22,15 @@
 #      生产编排会复用开发环境的数据库卷；而 MySQL 的 MYSQL_ROOT_PASSWORD
 #      仅在【数据目录为空时】生效，于是生产后端会用新口令去连旧库，直接连不上。
 #
+#   7. 【资源上限】每个服务都设了 cpus / memory 上限，避免单个服务（尤其是
+#      懒初始化的 RAG/向量库）把 2C4G 小机器拖垮导致整机 OOM。
+#      注意 limits 是「上限」不是「预留」：各项之和可以超过物理内存，
+#      只有同时占用才受物理内存约束。
+#
+#   8. 【宿主机可达】backend 通过 extra_hosts 显式声明 host.docker.internal。
+#      Docker Desktop（Mac/Win）默认可用，Linux 原生 Docker 不解析该名字，
+#      缺这一条会让「容器经宿主机代理访问模型服务」在 Linux 上直接连不上。
+#
 # 启动：
 #   cd docker && docker compose -f docker-compose.prod.yml up -d --build
 # =============================================================================
@@ -55,6 +64,13 @@ services:
       timeout: 20s
       retries: 10
       start_period: 40s
+    # 内存上限按「能跑起来的最小可用值」给：MySQL 8 默认 buffer pool 128M，
+    # 1g 足够单机小流量；若并发明显升高再上调。
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1g
     logging:
       driver: json-file
       options:
@@ -80,6 +96,12 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    # 纯内存 KV，数据量由使用方式决定；512m 对会话/缓存场景足够
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512m
     logging:
       driver: json-file
       options:
@@ -108,6 +130,12 @@ services:
       timeout: 20s
       retries: 3
       start_period: 20s
+    # MinIO 只做小对象（头像/附件/知识库原文），512m 足够
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512m
     logging:
       driver: json-file
       options:
@@ -131,15 +159,33 @@ services:
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-}
       # uvicorn worker 数：2C4G 建议 2，4C8G 可设 4
       UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
+    # ------------------------------------------------------------------
+    # 宿主机可达：Linux 原生 Docker 不解析 host.docker.internal，
+    # 必须显式映射到宿主机网关，否则经宿主机代理访问模型服务会失败。
+    # （Docker Desktop for Mac/Win 自带该名字，这条对其为无害冗余）
+    # ------------------------------------------------------------------
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # ------------------------------------------------------------------
+    # 资源上限：后端是唯一的重资源服务（Chrome、向量库、多 worker）。
+    # 可用 .env 的 BACKEND_CPUS / BACKEND_MEM_LIMIT 覆盖，例如 4C8G 机器设 4 / 5g。
+    # 注意：SSE 长连接会长期占用内存，上限设得过低会表现为「长对话中途被 OOM kill」。
+    # ------------------------------------------------------------------
+    deploy:
+      resources:
+        limits:
+          cpus: "${BACKEND_CPUS:-2.0}"
+          memory: "${BACKEND_MEM_LIMIT:-3g}"
     volumes:
-      # 生产配置以「挂载」方式提供，而非只依赖镜像内的 COPY。
-      # 原因：配置内含 API Key、口令等会变动的值。若固化在镜像里，
-      # 每次改一个 Key 都要重新构建镜像（uv sync + Chrome 下载，可能十几分钟）。
+      # 生产配置【只】以挂载方式提供，镜像内不存任何一份（Dockerfile 已删除
+      # 原来的 COPY）。原因：配置含 API Key、口令等会变动的值。若固化在镜像里，
+      # 每次改一个 Key 都要重新构建镜像（uv sync + Chrome 下载，可能十几分钟）；
       # 挂载后只需 `docker compose restart backend` 即可生效。
       #
       # ⚠️ 该文件由 docker/deploy.sh 生成，必须先存在再启动容器；
-      #    若路径不存在，Docker 会在宿主机【创建一个同名目录】并挂进去，
-      #    应用读取配置时会失败且报错难以理解。
+      #    若路径不存在，Docker 会在宿主机【创建一个同名目录】并挂进去。
+      #    入口脚本 docker/entrypoint.prod.sh 会在启动前校验该文件存在，
+      #    缺失时直接 FATAL 退出并打印排查步骤（而非带着默认配置跑到连库才报错）。
       - ./docker_config.prod.generated.yaml:/app/agentchat/config.yaml:ro
       # 向量库持久化：不挂载则容器重建会清空全部长期记忆与知识库索引
       - backend_memory_db:/app/memory_db
@@ -151,6 +197,24 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    # ------------------------------------------------------------------
+    # 就绪探针：/health 是应用内注册的业务健康端点（agentchat/main.py），
+    # 它返回 200 的前提是 FastAPI 的 lifespan 已完成 —— 也就是数据库初始化、
+    # 默认 Agent 写入等启动动作都跑完了。
+    #
+    # 与镜像内 HEALTHCHECK（探 /docs）的差别：/docs 只能证明「进程在监听」，
+    # 而 /health 语义上就是「可服务」。这里显式覆盖，是为了让
+    # frontend 的 condition: service_healthy 有明确含义。
+    #
+    # start_period 给 90s：首次启动要建表 + 写 36 个默认 Agent，
+    # 小机器上 30s 内 healthy 不了，否则会被误判为 unhealthy。
+    # ------------------------------------------------------------------
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7860/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
     networks:
       - agentchat-network
     logging:
@@ -176,10 +240,20 @@ services:
     environment:
       TZ: Asia/Shanghai
     depends_on:
-      - backend
-      - minio
+      backend:
+        # 等后端「可服务」再起 Nginx：否则首屏请求会撞上 502，
+        # 且 Nginx 的 resolver 变量写法会把失败延迟到请求时，排查时更容易误判。
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     networks:
       - agentchat-network
+    # Nginx 只做静态托管与反代，资源需求很低
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256m
     logging:
       driver: json-file
       options:

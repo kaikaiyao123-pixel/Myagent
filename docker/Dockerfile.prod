@@ -18,6 +18,12 @@
 #      - chrome  : selenium 抓取 AI 日报 + html2image 渲染必需（357MB）
 #      - 字体     : html2image 渲染中文需要 CJK 字体
 #
+#   4. 【非 root 运行】以 uid/gid 10001 的 app 用户启动 uvicorn。
+#      容器逃逸后攻击者只拿到普通用户权限，且无法改写 /app 内的代码。
+#      ⚠️ 卷权限：命名卷首次创建时会继承镜像内目录的属主（已 chown 给 app），
+#         但【已存在的旧卷】仍是 root 属主，升级时需手工 chown 一次，
+#         见文件末尾「非 root 运行」段落的说明。
+#
 # 实测体积：开发版 4.77GB → 生产版约 2.6GB
 # =============================================================================
 
@@ -152,24 +158,98 @@ RUN if [ "$INSTALL_CHROME" = "true" ]; then \
         echo "[跳过] INSTALL_CHROME=false，未安装 Chrome（AI 日报功能将不可用）" ; \
     fi
 
+# ---------------------------------------------------------------------------
+# 非 root 运行：先建用户，再用 COPY --chown 落属主。
+#
+# 为什么建在这里（而不是最后统一 chown -R /app）：
+#   /app/.venv 约 2.6GB、数万个文件，`chown -R` 要遍历整棵树，
+#   既拖慢构建，又会额外生成一整层「仅改属主」的元数据。
+#   在 COPY 时直接指定属主则没有这个代价。
+#
+# UID/GID 固定 10001（而非 1000）：
+#   * 1000 在多数发行版已属首个普通用户，与宿主机用户撞号会让挂载卷权限混乱；
+#   * 固定数值保证「宿主机 chown 10001」与镜像内一致，便于排查权限问题。
+#
+# ⚠️ 已存在的命名卷仍是旧属主（root），升级后应用会因无法写入 memory_db /
+#    vector_db 而 Permission denied。升级时执行一次：
+#      docker compose -f docker-compose.prod.yml run --rm --user root backend \
+#        chown -R 10001:10001 /app/memory_db /app/vector_db
+# ---------------------------------------------------------------------------
+ARG APP_UID=10001
+ARG APP_GID=10001
+
+RUN groupadd -g "${APP_GID}" app \
+ && useradd -u "${APP_UID}" -g app -M -d /app -s /usr/sbin/nologin app
+
 WORKDIR /app
 
 # 从 builder 复制已装好的虚拟环境（路径必须一致，venv 内为绝对路径）
-COPY --from=builder /app/.venv /app/.venv
+COPY --chown=app:app --from=builder /app/.venv /app/.venv
 
 # 复制后端代码
-COPY src/backend/ ./
+COPY --chown=app:app src/backend/ ./
 
-# 生产配置：由 docker/deploy.sh 从 docker_config.prod.template.yaml + docker/.env
-# 生成，内含真实口令。该文件已 gitignore，不会进入版本库。
-# 注意：直接 `docker compose build` 会因缺此文件而失败，请统一用 deploy.sh 部署。
-COPY docker/docker_config.prod.generated.yaml /app/agentchat/config.yaml
+# 数据目录兜底：仓库里若没带这两个空目录（被 gitignore），
+# 挂载点就会由 Docker 以 root 创建，命名卷随之变成 root 属主 → 应用无法写入。
+RUN mkdir -p /app/memory_db /app/vector_db \
+ && chown app:app /app/memory_db /app/vector_db
+
+# ---------------------------------------------------------------------------
+# 构建期断言：JWT 鉴权模块必须能在当前 Pydantic 版本下正常导入与构造。
+#
+# 为什么必须放在构建期：
+#   `fastapi-jwt-auth` 0.5.0 的 LoadConfig 是 Pydantic v1 写法，在 Pydantic 2
+#   下会直接抛错。本仓库已把该库【内联】为 src/backend/agentchat/auth/ 并迁移
+#   到 v2 写法（见该目录下 config.py 的说明）。一旦有人升级 Pydantic、或把
+#   校验器改回 v1 的 @validator，问题会在【这里】以构建失败的形式暴露，
+#   而不是等到部署完成、容器启动阶段才崩 —— 后者排查成本高得多。
+#
+# ⚠️ 不要用「改写 site-packages」的脚本代替本断言：那种补丁重建镜像即丢失。
+#    完整校验（7 条断言）可运行：python scripts/verify_jwt_auth_compat.py
+# ---------------------------------------------------------------------------
+# 注意：这条断言刻意写成【单行】。若用 `\` 续行 + 引号包裹多行 Python，
+#      续行处的空白是否被保留取决于解析器行为（实测本机解析器会插入一个空格，
+#      导致 IndentationError）。单行虽长，但没有歧义。
+RUN PYTHONPATH=/app /app/.venv/bin/python -c "from agentchat.auth import AuthJWT; from agentchat.auth.config import LoadConfig; LoadConfig(authjwt_secret_key='x' * 32); print('[build] JWT 鉴权模块兼容性检查通过')"
+
+# ---------------------------------------------------------------------------
+# 生产配置：不在镜像里放任何一份。
+#
+# 原实现有一条 `COPY docker/docker_config.prod.generated.yaml /app/agentchat/config.yaml`，
+# 已删除，原因有三：
+#   1. 该文件由 deploy.sh 渲染生成且被 gitignore，直接 `docker compose build`
+#      会因宿主机缺文件而失败 —— 等于把「部署脚本必须先跑」变成构建期硬约束；
+#   2. compose 又把同一路径以 :ro 挂进去，挂载必然覆盖 COPY，
+#      镜像里那份是死配置，只制造「没有 volume 也能起」的假象；
+#   3. 配置含口令与 API Key，固化进镜像意味着每换一次 Key 就要重建镜像，
+#      且旧 Key 会随镜像层残留（docker history 可导出）。
+#
+# 现状：配置【只】由 docker-compose.prod.yml 挂载提供；
+#      缺失时由入口脚本 docker/entrypoint.prod.sh 立即失败并给出排查提示。
+#      .dockerignore 同时排除了 src/backend/agentchat/config.yaml，
+#      确保宿主机的开发配置也不会被 COPY src/backend/ 带进镜像。
+# ---------------------------------------------------------------------------
+
+# 入口脚本：校验配置存在性后再 exec uvicorn（见脚本内注释）
+# 归 root 所有、755 权限：普通用户可读可执行但不可改写（防止应用被篡改后自启动）
+COPY docker/entrypoint.prod.sh /usr/local/bin/entrypoint.prod.sh
+RUN chmod 755 /usr/local/bin/entrypoint.prod.sh
+
+# ---------------------------------------------------------------------------
+# 切换为普通用户运行（用户已在上面创建，COPY 也已按 app:app 落属主）
+#
+# 为什么以 root 运行危险：任何应用层 RCE 都直接等价于容器内 root，
+# 配合默认 capabilities 可改写 /app 内代码、读取挂载的配置（含模型 Key）。
+# 切到普通用户后，攻击面收敛为「只读代码 + 可写数据目录」。
+# ---------------------------------------------------------------------------
+USER app:app
 
 # 运行期环境变量
 ENV PYTHONPATH=/app \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:${PATH}" \
+    HOME=/app \
     TZ=Asia/Shanghai
 
 EXPOSE 7860
@@ -181,4 +261,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
 # 生产启动参数：多 worker 提升并发；SSE 长连接下需注意 worker 数与内存的平衡
 # 单机小配置（2C4G）建议 workers=2；可通过 UVICORN_WORKERS 环境变量覆盖
 ENV UVICORN_WORKERS=2
-CMD ["sh", "-c", "/app/.venv/bin/uvicorn agentchat.main:app --host 0.0.0.0 --port 7860 --workers ${UVICORN_WORKERS} --proxy-headers --forwarded-allow-ips '*'"]
+
+# 启动入口：先校验挂载的生产配置存在，再 exec uvicorn（脚本内说明原因）。
+# 用 CMD 而非 ENTRYPOINT，保留 `docker compose run backend <cmd>` 的调试能力。
+CMD ["/usr/local/bin/entrypoint.prod.sh"]

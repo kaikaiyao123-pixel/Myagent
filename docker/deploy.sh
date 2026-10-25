@@ -22,7 +22,6 @@ COMPOSE_FILE="docker-compose.prod.yml"
 ENV_FILE=".env"
 TEMPLATE="docker_config.prod.template.yaml"
 GENERATED="docker_config.prod.generated.yaml"
-PROJECT_ROOT="$(cd .. && pwd)"
 
 # ----------------------------- 输出工具 --------------------------------------
 c_info()  { printf '\033[36m[信息]\033[0m %s\n' "$*"; }
@@ -123,8 +122,10 @@ prepare_env() {
   chmod 600 "$ENV_FILE"
   c_ok "已加载 $ENV_FILE"
 
+  set -a
   # shellcheck disable=SC1090
-  set -a; . "./$ENV_FILE"; set +a
+  . "./$ENV_FILE"
+  set +a
 
   local changed=0
 
@@ -216,8 +217,10 @@ render_config() {
   [ -f "$TEMPLATE" ] || { c_err "缺少模板 $TEMPLATE"; exit 1; }
 
   # 重新加载（可能刚被写入）
+  set -a
   # shellcheck disable=SC1090
-  set -a; . "./$ENV_FILE"; set +a
+  . "./$ENV_FILE"
+  set +a
 
   python3 - "$TEMPLATE" "$GENERATED" <<'PY'
 import os, sys, pathlib
@@ -310,9 +313,57 @@ do_deploy() {
     exit 1
   fi
 
-  # 后端首次启动需初始化数据库，多等一会
-  c_info "等待后端完成数据库初始化..."
-  sleep 20
+  # 后端首次启动需初始化数据库；用健康检查状态轮询，而不是固定 sleep
+  wait_backend_ready 300
+}
+
+# 轮询后端健康状态，替代原来的固定 sleep。
+#
+# 为什么不用 sleep 20（实测依据）：
+#   * 快机器上后端 8 秒就绪，sleep 20 是纯浪费；
+#   * 慢机器上首次启动要建表 + 写默认 Agent，20 秒根本不够，
+#     后面 do_verify 会拿到一串 502，看起来像"部署失败"。
+# 改为读取容器 HEALTHCHECK 的真实状态（compose 里已定义，探 /health），
+# 把"猜时间"变成"等事实"。
+#
+# 超时只告警不退出：让 do_verify 继续跑，用具体失败项定位问题，
+# 比在这里直接 abort 提供更多信息。
+wait_backend_ready() {
+  local timeout="${1:-300}" elapsed=0 cid state
+  c_step "等待后端就绪（首次含数据库初始化）"
+
+  cid=$(docker compose -f "$COMPOSE_FILE" ps -q backend 2>/dev/null || true)
+  if [ -z "$cid" ]; then
+    c_err "找不到 backend 容器，请检查 docker compose ps"
+    return 1
+  fi
+
+  while [ "$elapsed" -lt "$timeout" ]; do
+    state=$(docker inspect -f \
+      '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+      "$cid" 2>/dev/null || echo unknown)
+
+    case "$state" in
+      healthy)
+        echo ""
+        c_ok "后端已就绪（健康检查通过，用时 ${elapsed}s）"
+        return 0
+        ;;
+      unhealthy)
+        echo ""
+        c_err "后端健康检查失败（${elapsed}s），最近 50 行日志："
+        docker compose -f "$COMPOSE_FILE" logs --tail=50 backend
+        return 1
+        ;;
+    esac
+
+    sleep 5; elapsed=$((elapsed + 5))
+    printf '\r  已等待 %ss，后端状态：%s ...' "$elapsed" "$state"
+  done
+
+  echo ""
+  c_warn "等待 ${timeout}s 后端仍未 healthy，继续执行验收（失败项会具体列出）。"
+  return 0
 }
 
 # =============================================================================
@@ -430,11 +481,133 @@ do_verify() {
   c_warn "安全提示：请确认云服务器安全组已放行 80 端口；"
   c_warn "          数据库/Redis/MinIO 端口未对外开放（本编排已不映射宿主机端口）。"
   echo ""
-  c_warn "冷启动提示：容器启动后的【第一次】对话首字延迟可达 90 秒左右（重资源懒初始化），"
-  c_warn "            同一容器的后续请求会恢复到 1 秒内。建议现在就用一个账号发一条消息预热，"
-  c_warn "            否则第一个访问者会以为服务卡死。"
-
   [ "$fail" -eq 0 ] || exit 1
+
+  # 验收通过后立刻预热，避免第一个真实用户撞上 90 秒的首字延迟
+  warmup
+}
+
+# =============================================================================
+# 6. 冷启动预热
+# =============================================================================
+# 从 stdin 的 JSON 里按点号路径取值（取不到就输出空字符串）。
+# 用 python3 而不是 jq：preflight 已经强制要求 python3，jq 未必装了。
+_json_pick() {
+  python3 -c '
+import json, sys
+path = sys.argv[1].split(".")
+try:
+    cur = json.load(sys.stdin)
+    for k in path:
+        cur = cur[int(k)] if k.isdigit() else cur[k]
+    print("" if cur is None else cur)
+except Exception:
+    print("")
+' "$1"
+}
+
+# 把 JSON 字符串安全转成请求体（避免口令里的引号破坏 JSON）
+_json_body() {
+  python3 -c 'import json,sys; print(json.dumps(dict(zip(sys.argv[1::2], sys.argv[2::2])), ensure_ascii=False))' "$@"
+}
+
+# 冷启动预热：走一遍「登录 → 取 Agent → 建会话 → 发一条消息」的真实链路。
+#
+# 为什么需要：后端首次对话要懒初始化向量库与嵌入模型，首字延迟可达 90s。
+# 若把这一下留给第一个真实用户，他会以为服务卡死（原脚本只是 warn 一句）。
+#
+# 设计取舍：
+#   * 必须显式配置 WARMUP_USER / WARMUP_PASSWORD 才执行 —— 部署脚本不该
+#     硬编码任何账号口令；
+#   * 任何一步失败都只告警、不影响部署结论（预热是优化项，不是正确性项）；
+#   * 用 --max-time 兜住：预热本身卡住不该让部署脚本挂死。
+warmup() {
+  c_step "冷启动预热"
+
+  local base="${VERIFY_BASE_URL:-http://127.0.0.1}"
+
+  # --verify 模式不会走 prepare_env，这里按需补读 .env
+  if [ -f "$ENV_FILE" ] && { [ -z "${WARMUP_USER:-}" ] || [ -z "${WARMUP_PASSWORD:-}" ]; }; then
+    set -a
+    # shellcheck disable=SC1090
+    . "./$ENV_FILE"
+    set +a
+  fi
+
+  if [ -z "${WARMUP_USER:-}" ] || [ -z "${WARMUP_PASSWORD:-}" ]; then
+    c_info "未配置预热账号，跳过自动预热。"
+    c_info "  首次对话首字延迟约 90 秒（向量库/嵌入模型懒初始化）。请任选其一："
+    c_info "    a) 用浏览器登录后随手发一条「你好」，把初始化提前做掉；"
+    c_info "    b) 在 docker/.env 里设置 WARMUP_USER / WARMUP_PASSWORD，"
+    c_info "       再执行 ./deploy.sh --verify 自动完成一次真实对话预热。"
+    return 0
+  fi
+
+  local tmp="./.warmup.$$.tmp"
+  : > "$tmp"
+  local C=(curl -sS --noproxy '*' -m 30)
+
+  # 1) 登录
+  local login_json token
+  login_json=$("${C[@]}" -X POST "$base/api/v1/user/login" \
+    -H 'Content-Type: application/json' \
+    -d "$(_json_body user_name "$WARMUP_USER" user_password "$WARMUP_PASSWORD")" 2>/dev/null || true)
+  token=$(printf '%s' "$login_json" | _json_pick data.access_token)
+  if [ -z "$token" ]; then
+    c_warn "预热跳过：登录失败（检查 WARMUP_USER / WARMUP_PASSWORD 是否正确，账号是否已注册）。"
+    rm -f "$tmp"
+    return 0
+  fi
+  c_ok "预热：登录成功"
+
+  # 2) 取一个可用 Agent（系统内置 Agent 在初始化时已写入）
+  local agent_json agent_id
+  agent_json=$("${C[@]}" "$base/api/v1/agent" -H "Authorization: Bearer $token" 2>/dev/null || true)
+  agent_id=$(printf '%s' "$agent_json" | _json_pick data.0.agent_id)
+  [ -n "$agent_id" ] || agent_id=$(printf '%s' "$agent_json" | _json_pick data.0.id)
+  if [ -z "$agent_id" ]; then
+    c_warn "预热跳过：未能取到可用 Agent（默认 Agent 可能仍在初始化）。"
+    rm -f "$tmp"
+    return 0
+  fi
+  c_ok "预热：取到 Agent（$agent_id）"
+
+  # 3) 建一个临时会话
+  local dialog_json dialog_id
+  dialog_json=$("${C[@]}" -X POST "$base/api/v1/dialog" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $token" \
+    -d "$(_json_body name "部署预热" agent_id "$agent_id" agent_type "Agent")" 2>/dev/null || true)
+  dialog_id=$(printf '%s' "$dialog_json" | _json_pick data.dialog_id)
+  if [ -z "$dialog_id" ]; then
+    c_warn "预热跳过：创建会话失败（响应：$(printf '%s' "$dialog_json" | head -c 200)）。"
+    rm -f "$tmp"
+    return 0
+  fi
+
+  # 4) 发一条消息，触发懒初始化。
+  #    %{time_starttransfer} = 首字节时间，正是用户感知的「首字延迟」。
+  c_info "预热：发送测试消息并等待首字（最长 180 秒，首次可能很慢）..."
+  local ttfb
+  ttfb=$("${C[@]}" -o "$tmp" -w '%{time_starttransfer}' --max-time 180 \
+    -X POST "$base/api/v1/completion" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $token" \
+    -d "$(_json_body user_input "你好" dialog_id "$dialog_id")" 2>/dev/null || true)
+
+  case "$ttfb" in
+    ''|*[!0-9.]*) c_warn "预热未完成（请求超时或中断），可稍后重试：./deploy.sh --verify" ;;
+    *)            c_ok "预热完成：首字延迟 ${ttfb}s（后续请求应恢复到 1 秒内）" ;;
+  esac
+
+  # 清理临时会话，避免部署脚本在用户会话列表里留下垃圾记录
+  "${C[@]}" -X DELETE "$base/api/v1/dialog" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $token" \
+    -d "$(_json_body dialog_id "$dialog_id")" >/dev/null 2>&1 || true
+
+  rm -f "$tmp"
+  return 0
 }
 
 # =============================================================================

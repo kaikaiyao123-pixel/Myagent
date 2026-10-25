@@ -90,6 +90,10 @@ rag:
   enable_summary: False
   enable_elasticsearch: False
   enable_ik_analyzer: False
+  # 键名说明：retrival 是历史拼写（少一个 e），代码各处按此读取。
+  # 从本版本起 retrieval（正确拼写）也会被识别 —— schemas/common.py 的 Rag
+  # 在解析前会把 retrieval 归一化到 retrival，两者同时出现时以正确拼写为准。
+  # 因此这里保持历史拼写不变（向后兼容），新写配置用哪个都可以。
   retrival:
     top_k: 5
     min_score: 0.2

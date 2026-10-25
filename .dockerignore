@@ -14,6 +14,13 @@ src/backend/.ruff_cache/
 src/backend/.mypy_cache/
 src/backend/logs/
 
+# ⚠️ 开发用的应用配置不得进入镜像：
+#    生产镜像的配置【只】由 docker-compose.prod.yml 挂载提供。
+#    若这份文件被 `COPY src/backend/ ./` 带进镜像，就会出现
+#    「没有挂载也能起来」的假象 —— 实际跑的是开发库地址与开发口令，
+#    而 entrypoint 的存在性校验也会被这份"假配置"绕过。
+src/backend/agentchat/config.yaml
+
 # 前端
 src/frontend/node_modules/
 src/frontend/.pnpm/
