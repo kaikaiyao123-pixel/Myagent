@@ -41,6 +41,13 @@ dependencies = [
     "cachetools>=7.0.5",
 ]
 
+# 仅测试用依赖：CI 中 `pip install fakeredis` 单独装，或 `uv sync --extra test`。
+# 生产镜像走 `uv sync --frozen`（不启用 extra），因此 fakeredis 不会进入约 2.6GB 的
+# 运行时 .venv —— 它只在真 Redis 协议端到端测试（scripts/test_semantic_cache_redis_e2e.py）
+# 中作为 redis.StrictRedis 的内存替身使用，生产代码本身不 import 它。
+[project.optional-dependencies]
+test = ["fakeredis>=2.40"]
+
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"

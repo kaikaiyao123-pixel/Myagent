@@ -53,6 +53,11 @@ dependencies = [
     { name = "tiktoken" },
 ]
 
+[package.optional-dependencies]
+test = [
+    { name = "fakeredis" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "aiofiles", specifier = "==25.1.0" },
@@ -62,6 +67,7 @@ requires-dist = [
     { name = "chromadb", specifier = "==1.3.4" },
     { name = "dashscope", specifier = "==1.25.0" },
     { name = "elasticsearch", specifier = "==8.19.0" },
+    { name = "fakeredis", marker = "extra == 'test'", specifier = ">=2.40" },
     { name = "fastapi", specifier = "==0.121.0" },
     { name = "google-search-results", specifier = "==2.4.2" },
     { name = "html2image", specifier = "==2.0.7" },
@@ -89,6 +95,7 @@ requires-dist = [
     { name = "tavily-python", specifier = "==0.7.12" },
     { name = "tiktoken", specifier = "==0.12.0" },
 ]
+provides-extras = ["test"]
 
 [[package]]
 name = "aiofiles"
@@ -818,6 +825,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/41/43/948d10bf42735709edb5ae51e23297d034086f17fc7279fef385a7acb473/fake_useragent-2.2.0.tar.gz", hash = "sha256:4e6ab6571e40cc086d788523cf9e018f618d07f9050f822ff409a4dfe17c16b2", size = 158898, upload-time = "2025-04-14T15:32:19.238Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/51/37/b3ea9cd5558ff4cb51957caca2193981c6b0ff30bd0d2630ac62505d99d0/fake_useragent-2.2.0-py3-none-any.whl", hash = "sha256:67f35ca4d847b0d298187443aaf020413746e56acd985a611908c73dba2daa24", size = 161695, upload-time = "2025-04-14T15:32:17.732Z" },
+]
+
+[[package]]
+name = "fakeredis"
+version = "2.40.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "redis" },
+    { name = "sortedcontainers" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/61/d0/8cbd1339c2a606a0ceda74e1a181248d372bb2c66bc6cf9d954871839ff9/fakeredis-2.40.0.tar.gz", hash = "sha256:16eb05a3e97c37a033c73d1da7e885eb2aa47ba7604cc377144339efa2780a02", size = 332674, upload-time = "2026-10-14T12:46:01.851Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c7/e4/6919d3653d72c53d1fb22c97ceb6fa3664cad302994e90ee52279f7eb394/fakeredis-2.40.0-py3-none-any.whl", hash = "sha256:b155ef2442134372eb1cc5664cf5638ccbe0a6dde9d1942153708e2782f315c9", size = 204148, upload-time = "2026-10-14T12:46:00.014Z" },
 ]
 
 [[package]]

@@ -111,11 +111,14 @@ jobs:
       # ------------------------------------------------------------------
       # 三件套（稳健型：语义缓存 + Langfuse 埋点 + 评测 Harness）
       # ------------------------------------------------------------------
-      - name: 三件套离线单测（numpy / requests / langfuse）
+      - name: 三件套离线单测（numpy / requests / langfuse / fakeredis）
         run: |
-          python3 -m pip install --quiet numpy requests langfuse
+          # fakeredis 是仅测试用依赖（见 src/backend/pyproject.toml 的 [project.optional-dependencies].test），
+          # 不在生产镜像里；CI 中单独 pip install，用于「真 Redis 协议」端到端测试。
+          python3 -m pip install --quiet numpy requests langfuse fakeredis
           for t in test_semantic_cache test_semantic_cache_service \
-                   test_langfuse_trace test_integration_wiring test_eval_harness; do
+                   test_langfuse_trace test_integration_wiring test_eval_harness \
+                   test_semantic_cache_redis_e2e; do
             echo "=== $t ==="
             python3 "scripts/$t.py" || exit 1
           done
