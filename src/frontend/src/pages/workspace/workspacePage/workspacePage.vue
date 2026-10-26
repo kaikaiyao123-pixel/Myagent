@@ -202,7 +202,10 @@ onMounted(async () => {
   } else {
     // 标记为新会话
     isExistingSession.value = false
-    currentSessionId.value = crypto.randomUUID().replace(/-/g, '')
+    // crypto.randomUUID() 仅在 HTTPS/localhost 可用；明文 http:// 下需用兜底生成
+    currentSessionId.value = (crypto && typeof crypto.randomUUID === 'function')
+      ? crypto.randomUUID().replace(/-/g, '')
+      : (Date.now().toString(16) + Math.random().toString(16).slice(2)).replace(/-/g, '')
     // 新建会话
     // 从路由参数获取信息
     userQuery.value = route.query.query as string || ''

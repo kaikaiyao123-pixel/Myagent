@@ -3,95 +3,278 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AgentChat 公网部署清单</title>
+<title>AgentChat 公网部署清单（学生省钱版）</title>
 <style>
-  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
-       color:#1e293b;background:#f8fafc;line-height:1.7;margin:0;padding:32px;}
-  .wrap{max-width:900px;margin:0 auto;}
-  h1{font-size:22px;margin:0 0 4px;}
-  h2{font-size:17px;margin:30px 0 8px;padding-bottom:6px;border-bottom:1px solid #e2e8f0;}
-  p{margin:8px 0;}
-  .muted{color:#64748b;font-size:13px;}
-  .card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:18px;margin:14px 0;}
-  .path{display:flex;gap:10px;margin:10px 0;}
-  .tag{flex:1;background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:12px 14px;}
-  .tag.b{border-color:#bbf7d0;background:#f0fdf4;}
-  label{display:flex;gap:10px;align-items:flex-start;padding:7px 0;font-size:14px;cursor:pointer;}
-  input[type=checkbox]{margin-top:4px;width:16px;height:16px;flex:none;}
-  code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px;color:#0c447c;}
-  .warn{background:#fef3c7;border:1px solid #f59e0b;border-radius:10px;padding:12px 14px;font-size:13px;margin:12px 0;}
-  .step{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#0f172a;color:#e2e8f0;
-        border-radius:10px;padding:14px 16px;font-size:12.5px;white-space:pre;overflow-x:auto;}
-  .must{color:#b91c1c;font-weight:600;}
-  hr{border:none;border-top:1px dashed #cbd5e1;margin:18px 0;}
+* { box-sizing: border-box; }
+body { margin:0; font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif; color:#1f2933; background:#f5f7fa; line-height:1.7; }
+header.top { background:#0b6e4f; color:#fff; padding:26px 32px; }
+header.top h1 { margin:0 0 6px; font-size:23px; }
+header.top p { margin:0; opacity:.9; font-size:13px; }
+.banner { background:#fff4e5; border-left:4px solid #f0a020; color:#7a4b00; padding:12px 16px; margin:18px 32px; border-radius:6px; font-size:14px; }
+.wrap { max-width:940px; margin:0 auto; padding:0 24px 60px; }
+nav.toc { background:#fff; border:1px solid #e3e8ee; border-radius:8px; padding:16px 20px; margin:18px 0; }
+nav.toc h2 { margin:0 0 10px; font-size:16px; color:#0b6e4f; }
+nav.toc ul { margin:0; padding-left:20px; }
+nav.toc a { color:#0b6e4f; text-decoration:none; }
+nav.toc a:hover { text-decoration:underline; }
+section { background:#fff; border:1px solid #e3e8ee; border-radius:8px; padding:20px 24px; margin:18px 0; }
+section h2 { margin-top:0; font-size:18px; color:#0b6e4f; border-bottom:2px solid #e3e8ee; padding-bottom:8px; }
+h3 { font-size:15px; margin:18px 0 8px; color:#243b53; }
+.cb { background:#1e293b; color:#e2e8f0; border-radius:6px; margin:10px 0; overflow:hidden; }
+.cbhead { background:#0f172a; padding:6px 12px; font-size:12px; color:#94a3b8; display:flex; gap:12px; }
+.cblang { color:#38bdf8; }
+pre { margin:0; padding:14px 16px; overflow-x:auto; }
+code { font-family:"SFMono-Regular",Consolas,monospace; font-size:13px; white-space:pre; }
+.note { background:#eef6ff; border-left:4px solid #3b82f6; padding:10px 14px; margin:10px 0; border-radius:4px; font-size:14px; }
+.warn { background:#fef2f2; border-left:4px solid #ef4444; padding:10px 14px; margin:10px 0; border-radius:4px; font-size:14px; }
+ul, ol { padding-left:22px; }
+li { margin:4px 0; }
+table { border-collapse:collapse; width:100%; margin:10px 0; font-size:14px; }
+th, td { border:1px solid #e3e8ee; padding:8px 10px; text-align:left; vertical-align:top; }
+th { background:#f0f4f8; }
 </style>
 </head>
 <body>
-<div class="wrap">
+<header class="top">
 <h1>AgentChat 公网部署清单</h1>
-<p class="muted">两条上公网路径，按需选一。仓库已备齐两套脚本：<code>deploy.sh</code>（云服务器）与 <code>start_tunnel.sh</code>（内网穿透）。</p>
+<p>面向预算学生的自包含部署流程 · 生成于 2026-10-16 · 可离线打开 / 可打印</p>
+</header>
+<div class="wrap">
+<div class="banner"><b>预算学生方案总览：</b>阿里云轻量 2核2G = 38元/年（秒杀）或 68元/年（常规）→ 2核2G 需四步调优 → 域名 .cn 约 20-30元/年 → 大陆服务器需 ICP 备案。2核4G 机器可跳过调优、开箱即用。</div><nav class="toc"><h2>目录</h2><ul>
+<li><a href="#sec-buy">1. 购买服务器（阿里云轻量 2核2G）</a></li>
+<li><a href="#sec-init">2. 系统初始化：Docker + 2G swap</a></li>
+<li><a href="#sec-tune">3. 2核2G 四步调优（4G 可跳过）</a></li>
+<li><a href="#sec-env">4. 配置密钥（docker/.env）</a></li>
+<li><a href="#sec-deploy">5. 一键部署 AgentChat</a></li>
+<li><a href="#sec-domain">6. 购买域名</a></li>
+<li><a href="#sec-icp">7. ICP 备案（大陆必须）</a></li>
+<li><a href="#sec-https">8. 绑定域名与 HTTPS</a></li>
+<li><a href="#sec-ops">9. 运维与更新</a></li>
+<li><a href="#sec-faq">10. 前提与故障排查</a></li>
+</ul></nav><section id="sec-buy"><h2>1. 购买服务器（阿里云轻量 2核2G）</h2>
+<p>目标：最便宜、能跑通 AgentChat 的学生机。结论：<b>阿里云轻量应用服务器 2核2G</b> 是当前确认的最低价年付档。</p>
+<table>
+<tr><th>平台</th><th>规格</th><th>年付价</th><th>带宽</th></tr>
+<tr><td>阿里云轻量</td><td>2核2G / 40G ESSD</td><td><b>38 元/年</b>（每日秒杀）或 <b>68 元/年</b>（常规新用户）</td><td>200M 峰值 / 不限流量</td></tr>
+<tr><td>腾讯云轻量</td><td>2核2G</td><td>约 99 元/年</td><td>4M 固定</td></tr>
+<tr><td>腾讯云云+校园 CVM</td><td>2核4G</td><td>价格/时长未核实（需学生认证后看）</td><td>3M</td></tr>
+</table>
+<div class="note">阿里云 38 元/年是<b>每日秒杀</b>（上午 10:00、下午 15:00 两场，抢完即止）；抢不到选 68 元/年常规档，仍比腾讯 99 元/年便宜。两者都是<b>明确的 1 年价</b>（多来源一致、带"年"字样）。活动价随库存/时段浮动，<b>以你登录后页面显示为准</b>。</div>
+<h3>购买步骤（一步步点）</h3>
+<ol>
+<li><b>登录阿里云</b>：打开 aliyun.com，用淘宝 / 支付宝 / 手机号登录。</li>
+<li><b>实名认证</b>：右上角头像 → 「实名认证」→ 选「个人实名」，按提示填身份证。未实名不能购买。</li>
+<li><b>（建议）学生认证</b>：搜「云翼计划」或进「教育专区」，上传学生证 / 学信网截图，拿到学生优惠资格（可叠券）。</li>
+<li><b>进购买页</b>（二选一）：
+  <ul>
+    <li>常规 68 元/年：搜「轻量应用服务器」→ 产品页「立即购买」；或打开活动页 <code>https://www.aliyun.com/activity/superproducts/discount</code>（新人专享 68 元/年起）。</li>
+    <li>秒杀 38 元/年：每日 <b>10:00 / 15:00</b> 在轻量应用服务器活动页开抢，抢到即 38 元/年；抢不到回落到 68 元。</li>
+  </ul>
+</li>
+<li><b>选配置</b>：
+  <ul>
+    <li>地域：选离你近的（华东1 杭州 / 华南1 深圳 / 华北2 北京）。境外延迟高，且只有大陆服务器才需备案。</li>
+    <li>镜像：系统镜像 → <b>Ubuntu 22.04</b>。</li>
+    <li>套餐：选 <b>2核2G / 40G ESSD / 200M 峰值带宽</b>（对应 38 或 68 元/年档）。</li>
+    <li>购买时长：<b>1 年</b>。</li>
+  </ul>
+</li>
+<li><b>确认价格并支付</b>：确认是 <b>38 元</b>（秒杀）或 <b>68 元</b>（常规新用户），勾协议 → 去支付。</li>
+<li><b>拿到实例</b>：控制台 → 「轻量应用服务器」→ 看到新建实例，记下它的<b>公网 IP</b>（部署和域名解析都要用）。</li>
+</ol>
+<div class="note">68 元需<b>新用户</b>身份；38 元是每日限量秒杀。价格随时段/库存浮动，<b>以结算页显示为准</b>。活动页地址仅作入口参考，具体以官网当前活动为准。</div>
+<div class="note"><b>顺手领「学生专属 ¥300 抵扣金」</b>：完成学生认证后，在「云工开物 / 学生权益中心」(<code>university.aliyun.com</code>) 点「立即领取」¥300 无门槛代金券（每日限量、先到先得）。注意它<b>不与其他优惠活动叠加</b>，所以 38/68 元的 2核2G 特价款通常<b>不能用券再减</b>；券更适合用在没打折的产品（更大实例、RDS、OSS 等）。<b>域名注册一般不在券范围</b>。能否抵扣、抵多少以结算页为准。</div>
+</section><section id="sec-init"><h2>2. 系统初始化：Docker + 2G swap</h2>
+<h3>① 登录服务器</h3>
+<p>两种方式：</p>
+<ul>
+<li><b>控制台网页终端</b>：阿里云控制台 → 轻量应用服务器 → 实例 →「远程连接」→ 免客户端直接开终端。</li>
+<li><b>本地 SSH</b>：终端执行 <code>ssh root@你的公网IP</code>（密码是购买时设置的；也可在控制台绑定 SSH 密钥后免密）。</li>
+</ul>
+<p>在控制台实例详情页拿到<b>公网 IP</b>——后续部署和域名解析都要用它。</p>
+<h3>② 加 2G swap（关键）</h3>
+<p>登录后先装运行环境。重点：<b>2核2G 必须先加 swap</b>，否则构建阶段极易 OOM。</p>
+<div class="cb"><div class="cbhead"><span class="cblang">bash</span><span class="cbtitle">添加并持久化 swap</span></div><pre><code>sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+# 验证：free -h 应能看到 2.0Gi swap</code></pre></div>
+<h3>③ 安装 Docker + Compose</h3>
+<div class="cb"><div class="cbhead"><span class="cblang">bash</span><span class="cbtitle">安装 Docker 引擎与 Compose v2</span></div><pre><code># 官方一键脚本（Ubuntu）
+curl -fsSL https://get.docker.com | sudo sh
+# 让当前用户免 sudo 跑 docker（改完重新登录生效）
+sudo usermod -aG docker $USER
+# 确认版本
+docker --version
+docker compose version</code></pre></div>
+<h3>④ 配置 Docker 镜像加速器（国内必做）</h3>
+<p>Docker 默认从 <code>docker.io</code>（Docker Hub）拉镜像，<b>在中国大陆经常超时或不可达</b>，直接报 <code>dial tcp ... i/o timeout</code>。必须在部署前给 Docker 配国内镜像源，否则第 5 节的 <code>./deploy.sh</code> 构建必然卡死在拉取基础镜像（python / node / nginx / mysql / redis）。</p>
+<p><b>方案 A（推荐，最快）：阿里云专属加速器</b>。打开 <code>https://cr.console.aliyun.com</code> → 左侧「镜像工具」→「镜像加速器」，复制你的专属地址（形如 <code>https://xxxxxx.mirror.aliyuncs.com</code>），在服务器执行（把地址换成你自己的）：</p>
+<div class="cb"><div class="cbhead"><span class="cblang">bash</span><span class="cbtitle">阿里云专属镜像加速器（替换地址）</span></div><pre><code>sudo mkdir -p /etc/docker
+sudo tee /etc/docker/daemon.json &gt; /dev/null &lt;&lt;'EOF'
+{
+  "registry-mirrors": ["https://xxxxxx.mirror.aliyuncs.com"]
+}
+EOF
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+docker info | grep -A3 'Registry Mirrors'</code></pre></div>
+<p><b>方案 B（零注册，现在就能跑）：公用镜像源</b>。不登录任何控制台，直接粘贴：</p>
+<div class="cb"><div class="cbhead"><span class="cblang">bash</span><span class="cbtitle">公用镜像加速器（无需注册）</span></div><pre><code>sudo mkdir -p /etc/docker
+sudo tee /etc/docker/daemon.json &gt; /dev/null &lt;&lt;'EOF'
+{
+  "registry-mirrors": [
+    "https://hub-mirror.c.163.com",
+    "https://mirror.baidubce.com",
+    "https://docker.m.daocloud.io"
+  ]
+}
+EOF
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+docker info | grep -A5 'Registry Mirrors'</code></pre></div>
+<p>最后一行应能看到你配置的镜像地址，说明生效。<b>配置后必须 restart docker 才会生效</b>。</p>
+<div class="note">minio 镜像来自 <code>quay.io</code>，部分加速器不代理它。若部署时 minio 也超时，在 <code>docker/</code> 目录下执行 <code>sed -i 's#quay.io/minio/minio#minio/minio#' docker-compose.prod.yml</code> 改用 Docker Hub 上的同名官方镜像即可（无害，标签一致）。</div>
+<div class="note"><b>某个公用镜像源偶尔返回 502 / 404「not found」</b>：这是公用镜像源抖动（如 <code>docker.m.daocloud.io</code> 返回 502、<code>hub-mirror.c.163.com</code> 等对个别镜像返回 404「not found」），不是你的问题。<b>关键</b>：镜像源返回 404「not found」时 Docker <b>不会</b>自动换下一个源，所以必须把不行的源<b>直接从列表里删掉</b>（不能只排到最后），只留能用的；最稳是直接用方案 A 的阿里云专属加速器。若报 <code>no such host</code>（DNS 解析失败，如 <code>lookup hub-mirror.c.163.com ... no such host</code>），说明该源域名当前解析不了，直接换阿里云专属加速器；若<b>所有</b>源都 <code>no such host</code>，则是服务器 DNS 解析器问题，把 <code>/etc/resolv.conf</code> 的 nameserver 改为 <code>223.5.5.5</code> / <code>8.8.8.8</code> 即可。改完 <code>systemctl restart docker</code> 再重跑 <code>bash ./deploy.sh</code>，已拉取的层有缓存会续跑。</div>
+<h3>⑤ 确认 python3</h3>
+<div class="cb"><div class="cbhead"><span class="cblang">bash</span><span class="cbtitle">确认 python3</span></div><pre><code>python3 --version   # 一般系统已自带，需 &gt;= 3.10</code></pre></div>
+<div class="warn">构建阶段（uv sync 拉 Python 包 + 下载 Chromium + 前端 vite 构建）内存峰值很高。<b>2G 不加 swap 几乎必 OOM</b>。若构建仍 OOM，临时把 swap 加到 3-4G，构建完再降回 2G。</div>
+</section><section id="sec-tune"><h2>3. 2核2G 四步调优（4G 机器可跳过）</h2>
+<div class="warn"><b>执行本节前必须先完成第 5 节的 git clone</b>：本节的调优脚本改的是克隆到服务器上的 <code>docker/.env</code> 与 <code>docker-compose.prod.yml</code>，文件不存在就无法改。且所有命令都必须在克隆下来的 <code>docker/</code> 目录里执行（先 <code>cd Myagent/docker</code>）。</div>
+<p>deploy.sh 在内存低于 3500MB 时<b>只是告警、不会中止</b>；真正会 exit 1 的只有 Docker/Compose/守护进程/python3 缺失，或 DASHSCOPE_API_KEY 为空。但 2G 要跑得稳，需改 4 处（均在项目 <code>docker/</code> 目录）：</p>
+<h3>步骤 A：docker/.env 降 worker + 填密钥</h3>
+<div class="cb"><div class="cbhead"><span class="cblang">env</span><span class="cbtitle">docker/.env 关键项</span></div><pre><code># 必填：否则 deploy.sh 直接 exit 1
+DASHSCOPE_API_KEY=sk-你的真实key
 
-<div class="path">
-  <div class="tag">
-    <strong>方案 A · 云服务器（正式）</strong>
-    <p class="muted">固定地址、长期可用。需一台公网服务器。</p>
-  </div>
-  <div class="tag b">
-    <strong>方案 B · 内网穿透（临时）</strong>
-    <p class="muted">零服务器、本机直上公网。地址会过期。</p>
-  </div>
+# 2核2G 只开 1 个 worker（默认值 2 会吃紧）
+UVICORN_WORKERS=1</code></pre></div>
+<h3>步骤 B：docker-compose.prod.yml 给 MySQL 限内存</h3>
+<p>把 <code>mysql</code> 服务的 <code>image: mysql:8.0</code> 下面加一行 <code>command</code>，把 MySQL 压到约 150MB：</p>
+<div class="cb"><div class="cbhead"><span class="cblang">yaml</span><span class="cbtitle">mysql 服务追加 command</span></div><pre><code>  mysql:
+    container_name: agentchat-mysql
+    image: mysql:8.0
+    # 2核2G 必加：限制 MySQL 内存占用
+    command:
+      - 'mysqld'
+      - '--innodb-buffer-pool-size=64M'
+      - '--performance-schema=OFF'
+      - '--max-connections=50'</code></pre></div>
+<h3>步骤 C：swap（已在第 2 步完成）</h3>
+<p>确认 <code>free -h</code> 能看到 2G swap。</p>
+<h3>步骤 D：构建仍 OOM 的兜底</h3>
+<ol>
+<li>临时把 swap 加到 3-4G 再构建，完成后降回 2G。</li>
+<li>或在本机（配置更好的电脑）先 <code>docker compose build</code> 把镜像 <code>docker save</code> 传上服务器 <code>docker load</code>，服务器只 <code>up</code> 不 <code>build</code>。</li>
+</ol>
+<h3>一键调优脚本（粘贴即用，无需手动编辑）</h3>
+<p>在克隆下来的 <code>docker/</code> 目录里执行下面这段即可：</p>
+<div class="cb"><div class="cbhead"><span class="cblang">bash</span><span class="cbtitle">2核2G 一键调优</span></div><pre><code># 必须在克隆仓库的 docker/ 目录下执行；否则明确报错退出
+test -f docker-compose.prod.yml &amp;&amp; test -f .env.prod.example || { echo "错误：请在克隆仓库的 docker/ 目录下执行本脚本（先 cd Myagent/docker）"; exit 1; }
+cp -n .env.prod.example .env
+# .env：worker 降为 1
+sed -i 's/^UVICORN_WORKERS=.*/UVICORN_WORKERS=1/' .env
+# 填入 DASHSCOPE key（把 sk-你的真实key 换成实际值，否则 deploy.sh 会 exit 1）
+sed -i 's/^#\?DASHSCOPE_API_KEY=.*/DASHSCOPE_API_KEY=sk-你的真实key/' .env
+# compose：给 mysql 加内存上限（幂等，重复执行不会重复加）
+python3 - &lt;&lt;'PY'
+p='docker-compose.prod.yml'
+s=open(p).read()
+inject="    command:\n      - 'mysqld'\n      - '--innodb-buffer-pool-size=64M'\n      - '--performance-schema=OFF'\n      - '--max-connections=50'\n"
+seg=s.split('mysql:',1)[1].split('redis:',1)[0]
+if 'command:' not in seg:
+    s=s.replace("    image: mysql:8.0\n", "    image: mysql:8.0\n"+inject, 1)
+    open(p,'w').write(s)
+    print('MySQL 限内存 command 已添加')
+else:
+    print('MySQL command 已存在，跳过')
+PY</code></pre></div>
+<div class="note">脚本幂等；DASHSCOPE_API_KEY 必须换成你的真实 key，否则 ./deploy.sh 会 exit 1。改完直接 <code>./deploy.sh</code> 即可。</div>
+</section><section id="sec-env"><h2>4. 配置密钥（docker/.env）</h2>
+<p>复制示例文件并按需填写：</p>
+<div class="cb"><div class="cbhead"><span class="cblang">bash</span><span class="cbtitle">生成 .env</span></div><pre><code>cd /path/to/AgentChat-main/docker
+cp .env.prod.example .env
+nano .env</code></pre></div>
+<table>
+<tr><th>变量</th><th>必填</th><th>说明</th></tr>
+<tr><td>DASHSCOPE_API_KEY</td><td>是</td><td>通义千问/百炼密钥，空则 deploy.sh exit 1</td></tr>
+<tr><td>MYSQL_ROOT_PASSWORD</td><td>是</td><td>数据库 root 口令，设强口令</td></tr>
+<tr><td>MINIO_ROOT_PASSWORD</td><td>是</td><td>对象存储口令</td></tr>
+<tr><td>AUTHJWT_SECRET_KEY</td><td>自动</td><td>由 deploy.sh 自动生成，无需手填</td></tr>
+<tr><td>DEEPSEEK_API_KEY / AMAP_API_KEY / TAVILY_API_KEY</td><td>否</td><td>按需启用对应能力</td></tr>
+<tr><td>SKIP_LLM_KEY_CHECK</td><td>否</td><td>设为 1 可跳过 DASHSCOPE 必填校验（仅调试）</td></tr>
+</table>
+<div class="note">其余密钥留空不影响基础部署；CORS_ALLOW_ORIGINS 同源部署留空即可。</div>
+</section><section id="sec-deploy"><h2>5. 一键部署 AgentChat</h2>
+<p>把代码弄到服务器：先在你<b>本机</b>完成 <code>git push</code>（沙箱无法代推，见第 10 节），再在<b>服务器</b>克隆仓库：</p>
+<div class="cb"><div class="cbhead"><span class="cblang">bash</span><span class="cbtitle">服务器：克隆并部署</span></div><pre><code># 在【服务器】上执行
+git clone https://github.com/kaikaiyao123-pixel/Myagent.git
+cd Myagent/docker
+
+# 首次部署：预检 -&gt; 生成密钥 -&gt; 渲染配置 -&gt; 构建 -&gt; 启动 -&gt; 验收
+./deploy.sh
+
+# 仅做验收（不重建）
+./deploy.sh --verify
+
+# 停止全部服务
+./deploy.sh --down</code></pre></div>
+<p>部署成功后，浏览器访问 <code>http://服务器公网IP</code> 即可看到站点。若需上线域名，继续第 6-8 节。</p>
+<div class="warn">deploy.sh 的预检会检查 Docker/Compose/守护进程/python3，缺失即 exit 1；内存不足只是告警。若卡在 exit 1，优先看是不是 DASHSCOPE_API_KEY 没填、或 Docker 没装好。</div>
+<div class="note">若构建阶段卡在 <code>load metadata for ... i/o timeout</code>，这是 Docker Hub 在国内不可达，<b>不是你的配置错</b>——回到第 2 节 ④ 给 Docker 配镜像加速器后，再跑 <code>bash ./deploy.sh</code>。</div>
+<div class="note"><b>构建很慢是正常的，别中断</b>：2核2G + 重镜像（gcc/pandoc/CJK 字体 + Chromium + 前端 vite 构建）首次构建常需 <b>20–40 分钟</b>，其中 apt-get 装编译工具、<code>npm run build</code> 各可能耗 5–10 分钟。进度数字（如 <code>(21/35)</code>）在涨就说明在跑，<b>不要 Ctrl-C、不要关终端</b>（SSH 掉线也会杀掉构建）。建议用 <code>tmux</code> 跑部署，断线也不中断；若不慎中断，重新 <code>bash ./deploy.sh</code> 会靠 Docker 层缓存从断点续跑。</div>
+</section><section id="sec-domain"><h2>6. 购买域名</h2>
+<ul>
+<li>渠道：<b>阿里云万网</b> 或 <b>腾讯云 DNSPod</b>。</li>
+<li>价格：<code>.cn</code> 首年约 20-30 元，<code>.top</code> 约 10 元，<code>.com</code> 稍贵（约 60-80 元/年）。学生展示站用 <code>.cn</code> 性价比高。</li>
+<li><b>一个域名可以挂多个网站</b>：用子域名（如 <code>api.yourdomain.cn</code>、<code>www.yourdomain.cn</code>）A 记录指向同一公网 IP，由 Nginx 的 <code>server_name</code> 分流；或用子路径。</li>
+</ul>
+<div class="note">域名和服务器可以在不同厂商（如在阿里云买服务器、在腾讯云买域名），只要把域名 DNS 解析到服务器 IP 即可。</div>
+</section><section id="sec-icp"><h2>7. ICP 备案（大陆服务器必须）</h2>
+<ul>
+<li>在中国大陆，服务器对外提供 Web 服务<b>必须 ICP 备案</b>；未备案的域名解析到大陆服务器会被阻断。</li>
+<li><b>一个域名备一次即可覆盖其下所有子站</b>（www / api 等都不用单独备）。</li>
+<li>流程：在服务器厂商的备案系统（阿里云备案 / 腾讯云备案）提交资料 → 管局审核，通常 1-2 周。</li>
+<li>备案期间，域名<b>不能</b>指向未备案的服务器对外服务；可先用 IP 访问调试，备案通过后再绑域名。</li>
+</ul>
+<div class="warn">若你买的是<b>境外/中国香港</b>服务器，则无需 ICP 备案，但国内访问延迟更高。学生展示站建议走大陆服务器 + 备案，访问体验好。</div>
+</section><section id="sec-https"><h2>8. 绑定域名与 HTTPS</h2>
+<h3>① 解析</h3>
+<p>在域名控制台添加 A 记录：<code>@</code> 和 <code>www</code> 都指向服务器公网 IP。</p>
+<h3>② 开启 HTTPS（可选但建议）</h3>
+<ol>
+<li>免费证书：用 <b>Cloudflare</b>（泛域名证书，改 NS 接入）或 <b>Let's Encrypt</b>（certbot）。</li>
+<li>修改 <code>docker-compose.prod.yml</code> 的 <code>frontend</code> 服务，取消 <code>ports: - "443:443"</code> 注释，并把 80 改为跳转。</li>
+<li>在 <code>nginx/nginx.prod.conf</code> 中配置 443 监听与证书路径。</li>
+</ol>
+<div class="note">备案通过前，先只用 IP 访问调试；备案通过后再切到域名 + HTTPS。</div>
+</section><section id="sec-ops"><h2>9. 运维与更新</h2>
+<h3>更新代码</h3>
+<div class="cb"><div class="cbhead"><span class="cblang">bash</span><span class="cbtitle">拉取更新并重新部署</span></div><pre><code>cd /path/to/AgentChat-main
+git pull
+cd docker
+./deploy.sh          # 会重新构建并热更新</code></pre></div>
+<h3>查看日志</h3>
+<div class="cb"><div class="cbhead"><span class="cblang">bash</span><span class="cbtitle">查看服务日志</span></div><pre><code>docker logs -f agentchat-backend
+docker logs -f agentchat-frontend</code></pre></div>
+<h3>数据备份</h3>
+<p>持久化数据在 Docker 卷：<code>mysql_data</code>、<code>minio_data</code>、<code>backend_memory_db</code>、<code>backend_vector_db</code>。定期备份这些卷即可（长期记忆与知识库索引都在其中）。</p>
+</section><section id="sec-faq"><h2>10. 前提与故障排查</h2>
+<div class="warn"><b>重要前提 — 需你本机执行 git push：</b>本环境无法直连 GitHub（出口代理对 github.com:443 返回 502），密钥已清理、历史已重建为干净的两笔提交。请在你的<b>本机</b>执行：
 </div>
-
-<h2>方案 A — 云服务器标准部署</h2>
-<div class="card">
-  <p><span class="must">① 必须：</span>一台云服务器（公网 IP、≥4GB 内存、≥20GB 磁盘、Docker 20.10+ 与 Compose V2）</p>
-  <label><input type="checkbox"> 已购买/准备好云服务器，能 SSH 登录</label>
-  <label><input type="checkbox"> 安全组/防火墙已放行 <code>80</code>（要 HTTPS 再放行 <code>443</code>）</label>
-  <label><input type="checkbox"> 已 <code>git clone</code> 仓库并 <code>cd AgentChat-main/docker</code></label>
-
-  <p><span class="must">② 必须：</span>编辑 <code>docker/.env</code>（已存在，勿 cp 覆盖）</p>
-  <label><input type="checkbox"> <code>DASHSCOPE_API_KEY=</code> 已填真实 Key（空着 deploy.sh 会中止）</label>
-  <label><input type="checkbox"> <code>MYSQL_ROOT_PASSWORD</code> / <code>MINIO_ROOT_PASSWORD</code> 已设强口令（非 123456 / minioadmin；留空会自动生成）</label>
-  <label><input type="checkbox"> 其余模型/工具 Key（DeepSeek、高德、Tavily…）按需填；微信/Langfuse/OSS 可选</label>
-
-  <p><span class="must">③ 必须（建议）：</span>域名 + HTTPS</p>
-  <label><input type="checkbox"> 在 <code>nginx/nginx.prod.conf</code> 把 <code>server_name _</code> 改为域名，并加 443 + 证书（或前面套 Cloudflare 终止 TLS）</label>
-  <label><input type="checkbox"> 提交前端域名到 <code>CORS_ALLOW_ORIGINS</code>（同源部署可留空）</label>
-</div>
-
-<div class="step"># 在服务器上执行
-cd AgentChat-main/docker
-nano .env            # 填 DASHSCOPE_API_KEY 与强口令
-./deploy.sh          # 预检→生成密钥→渲染配置→构建→启动→验收
-./deploy.sh --verify # 只验收不重部署
-./deploy.sh --down   # 停服（保留数据卷）</div>
-
-<div class="warn"><strong>方案 A 必知坑：</strong>
-① 冷启动首字延迟可达 ~90 秒（重资源懒初始化），部署完务必先用一个账号发一条消息"预热"；
-② 首次启动后端要初始化数据库，若 5 个容器未全起，看 <code>docker compose -f docker-compose.prod.yml logs</code>；
-③ 容器数据卷名为 <code>agentchat-prod</code>，与开发版隔离，勿混用。</div>
-
-<h2>方案 B — 内网穿透隧道（本机）</h2>
-<div class="card">
-  <p><span class="must">① 必须：</span>本机服务已跑起来</p>
-  <label><input type="checkbox"> <code>cd AgentChat-main/docker && docker compose up -d</code> 已执行</label>
-  <label><input type="checkbox"> <code>http://127.0.0.1:8090</code> 有响应（start_tunnel.sh 会自检）</label>
-
-  <p><span class="must">② 必须：</span>能出网 + 有 ssh 客户端</p>
-  <label><input type="checkbox"> 系统自带 OpenSSH（Windows 10+ 默认可用）</label>
-  <label><input type="checkbox"> 接受地址过期：serveo ~10–30 分钟 / pinggy 60 分钟（脚本自动重连换地址）</label>
-  <label><input type="checkbox"> 若要固定地址：去 serveo 控制台登记 SSH 公钥，用 <code>SUBDOMAIN=xxx ./start_tunnel.sh</code></label>
-</div>
-
-<div class="step"># 在本机执行
-cd AgentChat-main/docker
-docker compose up -d
-./start_tunnel.sh            # serveo（默认）
-./start_tunnel.sh pinggy     # 或 pinggy
-# 公网地址打印并写入 tunnel_url.txt</div>
-
-<hr>
-<p class="muted">验收口径（deploy.sh 已内置）：前端首页 200、<code>/healthz</code> 200、<code>/api/v1/dialog/list</code> 返回 401/403（说明反代贯通且鉴权生效）、<code>/minio/agentchat/</code> 可达。</p>
+<div class="cb"><div class="cbhead"><span class="cblang">bash</span><span class="cbtitle">本机推送（远端为空，无需 --force）</span></div><pre><code># 在本机（不是服务器、不是本环境）执行
+cd /d E:\Code\AgentChat-main
+git push -u origin main</code></pre></div>
+<h3>常见故障</h3>
+<table>
+<tr><th>现象</th><th>原因/处理</th></tr>
+<tr><td>deploy.sh 直接 exit 1</td><td>多半 DASHSCOPE_API_KEY 为空，或 Docker/Compose 未装好</td></tr>
+<tr><td>构建中途被杀 / 容器起不来</td><td>内存不足 OOM，回看第 2、3 节加 swap + 降 worker + 限 MySQL</td></tr>
+<tr><td>构建卡在 load metadata / dial tcp ... i/o timeout</td><td>Docker Hub 国内不可达，回到第 2 节 ④ 配置镜像加速器</td></tr>
+<tr><td>浏览器打不开站点</td><td>检查 80 端口是否被占用（如已有 nginx），或服务器安全组是否放行 80</td></tr>
+<tr><td>域名访问被阻断</td><td>大陆服务器未 ICP 备案，先备案或用 IP 临时访问</td></tr>
+</table>
+</section>
 </div>
 </body>
 </html>

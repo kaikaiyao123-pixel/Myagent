@@ -432,7 +432,12 @@ onMounted(async () => {
   } else {
     // 新任务模式：生成指导手册
     console.log('新任务模式')
-    currentSessionId.value = sessionId || crypto.randomUUID().replace(/-/g, '')
+    // crypto.randomUUID() 仅在 HTTPS/localhost 可用；明文 http:// 下需用兜底生成
+    const genId = () =>
+      (crypto && typeof crypto.randomUUID === 'function')
+        ? crypto.randomUUID().replace(/-/g, '')
+        : (Date.now().toString(16) + Math.random().toString(16).slice(2)).replace(/-/g, '')
+    currentSessionId.value = sessionId || genId()
     
     // 保存参数
     originalParams.value.query = route.query.query as string || ''

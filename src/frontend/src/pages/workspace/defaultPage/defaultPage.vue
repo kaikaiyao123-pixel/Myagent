@@ -168,8 +168,13 @@ const toggleMcp = (serverId: string) => {
 
 // 生成UUID（模拟Python的uuid4().hex）
 const generateSessionId = (): string => {
-  // 使用crypto.randomUUID()生成UUID，然后移除横杠
-  return crypto.randomUUID().replace(/-/g, '')
+  // 生成UUID（模拟Python的uuid4().hex）
+  // 注意：crypto.randomUUID() 仅在 secure context（HTTPS/localhost）可用，
+  // 在明文 http:// 下为 undefined。这里做兜底，避免日常模式在 HTTP 部署下发送崩溃。
+  if (crypto && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID().replace(/-/g, '')
+  }
+  return (Date.now().toString(16) + Math.random().toString(16).slice(2)).replace(/-/g, '')
 }
 
 // 自动滚动到底部
