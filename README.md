@@ -4,8 +4,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.12+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python" />
-  <img src="https://img.shields.io/badge/FastAPI-0.115+-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" />
-  <img src="https://img.shields.io/badge/LangChain-1.0+-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white" alt="LangChain" />
+  <img src="https://img.shields.io/badge/FastAPI-0.121+-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/LangChain-1.2+-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white" alt="LangChain" />
   <img src="https://img.shields.io/badge/Vue-3.4+-4FC08D?style=for-the-badge&logo=vuedotjs&logoColor=white" alt="Vue" />
   <img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License" />
@@ -26,10 +26,12 @@
 - [三、核心链路拆解](#三核心链路拆解)
 - [四、技术栈](#四技术栈)
 - [五、我的工作](#五我的工作)
-- [六、技术难点与解决](#六技术难点与解决)
-- [七、快速开始](#七快速开始)
-- [八、目录结构](#八目录结构)
-- [九、来源与许可](#九来源与许可)
+- [六、质量保障与测试](#六质量保障与测试)
+- [七、技术难点与解决](#七技术难点与解决)
+- [八、快速开始](#八快速开始)
+- [九、目录结构](#九目录结构)
+- [十、已知问题](#十已知问题)
+- [十一、来源与许可](#十一来源与许可)
 
 ---
 
@@ -39,15 +41,15 @@ AgentChat 是一个 **LLM 驱动的智能体应用平台**：用户可自定义 
 
 ### 关于我的角色（如实说明）
 
-**本项目的核心 Agent 框架来自开源项目**（见 [九、来源与许可](#九来源与许可)），并非我个人从零原创。我在其之上完成了**工程化落地与工具开发**，这也是我投递大模型应用 / Agent 方向时主要想展示的部分：
+**本项目的核心 Agent 框架来自开源项目**（见 [十一、来源与许可](#十一来源与许可)），并非我个人从零原创。我在其之上完成了**工程化落地、工具开发与质量体系建设**，这也是我投递大模型应用 / Agent 方向时主要想展示的部分：
 
 | 维度 | 内容 |
 |---|---|
-| **我新增的文件** | 35 个（已通过比对上游仓库文件树逐文件核实） |
-| **我负责的模块** | MCP Server 开发、RAG 链路端到端测试、生产级容器化部署、后端链路文档化、稳健型三件套（语义缓存 / Langfuse 埋点 / 评测 Harness） |
+| **我新增的文件** | 35 个功能文件（已通过比对上游仓库文件树逐文件核实）+ 4 个质量门禁文件 |
+| **我负责的模块** | MCP Server 开发、RAG 链路端到端测试、生产级容器化部署、后端链路文档化、稳健型三件套（语义缓存 / Langfuse 埋点 / 评测 Harness）、接口级质量门禁 |
 | **未改动的部分** | Agent 编排、RAG 检索、Memory 等核心逻辑保持上游实现 |
 
-我选择如实标注来源，是因为把开源项目包装成个人原创在面试中经不起追问——**而"工程化落地"恰恰是可以坦然深挖、也更容易讲出细节的部分**。
+我选择如实标注来源，是因为把开源项目包装成个人原创在面试中经不起追问——**而"工程化落地"与"质量保障"恰恰是可以坦然深挖、也更容易讲出细节的部分**。
 
 ---
 
@@ -143,12 +145,13 @@ MCPConfig(type=sse, url) → convert_mcp_config → MCPManager
 
 | 层 | 技术 |
 |---|---|
-| 后端 | Python 3.12 · FastAPI · LangChain 1.0 / LangGraph · Pydantic |
+| 后端 | Python 3.12 · FastAPI 0.121 · LangChain 1.2 / LangGraph · Pydantic v2 · SQLModel |
 | 前端 | Vue 3.4 · Element Plus · Pinia · Vite 5 · TypeScript |
 | 模型 | DashScope（OpenAI 兼容接口）：对话 / 工具调用 / 推理 / VL / Embedding |
 | 存储 | MySQL 8.0 · Redis 7.0 · MinIO · Milvus · Elasticsearch · ChromaDB |
 | 协议 | SSE 流式 · MCP（Model Context Protocol）· JWT · Swagger / OpenAPI |
 | 工程化 | Docker 多阶段构建 · Docker Compose · Nginx 反向代理 · Bash 自动化部署 |
+| 质量 | unittest 离线单测 · AST 静态扫描 · 路由契约比对 · vue-tsc 类型门禁 · GitHub Actions |
 
 ---
 
@@ -190,7 +193,7 @@ MCPConfig(type=sse, url) → convert_mcp_config → MCPManager
 | `Dockerfile.frontend.prod` | 前端多阶段构建 → Nginx 静态站点（替代 Vite dev server） |
 | `docker-compose.prod.yml` | 生产编排：仅暴露 Nginx，其余服务全走内部网络 |
 | `nginx/nginx.prod.conf` | 静态托管 + `/api` 与 `/minio` 反代 + SSE 专项配置 |
-| `deploy.sh` | 459 行一键部署：环境预检 → 自动生成密钥 → 渲染配置 → 构建启动 → 验收自检，支持 `--verify` / `--down` |
+| `deploy.sh` | 693 行一键部署：环境预检 → 自动生成密钥 → 渲染配置 → 构建启动 → 验收自检，支持 `--verify` / `--down` |
 | `.env.prod.example`、`docker_config.prod.template.yaml` | 配置模板，真实凭据排除出版本控制 |
 | `docker-compose.local.yml`、`docker_config.example.yaml` | 本地编排与配置示例 |
 | `start_tunnel.sh` / `.bat` | 内网穿透脚本（无公网 IP 时对外演示） |
@@ -199,7 +202,7 @@ MCPConfig(type=sse, url) → convert_mcp_config → MCPManager
 
 - **最小暴露面**：只有 Nginx 映射宿主机 80/443，MySQL / Redis / MinIO / backend 均不映射端口
 - **口令强制注入**：所有口令用 `${VAR:?错误提示}` 注入，未配置则**启动即失败**，杜绝"忘记改弱口令就上线"
-- **安全加固**：原代码 JWT 密钥硬编码为 `secret`（可被伪造 token），改为环境变量注入；CORS 由放行 `*` 收紧为显式白名单
+- **安全加固**：原代码 JWT 密钥硬编码为 `secret`（可被伪造 token），改为环境变量注入，未配置时退化为每次启动随机生成；CORS 由放行 `*` 收紧为显式白名单
 - **可运维性**：全服务 `healthcheck` + `depends_on: condition: service_healthy` 编排启动顺序；日志 `max-size` / `max-file` 轮转防写满磁盘
 - **数据持久化**：显式声明 `backend_memory_db` / `backend_vector_db` 卷——不挂载则容器重建会清空全部长期记忆与知识库索引
 - **配置挂载而非打进镜像**：改一个 API Key 只需 `docker compose restart backend`，无需重建镜像（避免重跑 `uv sync` 与 Chrome 下载的十几分钟）
@@ -215,7 +218,7 @@ MCPConfig(type=sse, url) → convert_mcp_config → MCPManager
 
 ### 5.5 稳健型三件套：语义缓存 · Langfuse 埋点 · 评测 Harness
 
-新增 11 个文件、改动 11 个文件，配套 **83 个离线单测 + 19 个 bug 注入探针**。
+新增 11 个文件、改动 11 个文件，配套 **87 个离线单测**。
 
 要解决的问题：改一次提示词或检索参数，效果是变好还是变坏？此前只能靠主观感受回答。三件套分别对应**降本**（语义缓存）、**可观测**（Langfuse 埋点）、**可回归**（评测 Harness），**默认全部关闭**，不改变现有行为。
 
@@ -282,7 +285,53 @@ python scripts/eval_harness.py --endpoint ... --update-baseline   # 更新基线
 
 ---
 
-## 六、技术难点与解决
+## 六、质量保障与测试
+
+功能迭代速度远快于回归速度，是这个项目最初的真实状态：CI 只校验 YAML / Compose / Nginx 语法，**接口行为没有任何自动化保护**。为此我补了一层"不需要数据库也能跑"的接口级门禁（`qa/`，新增 5 个文件）。
+
+### 6.1 三层门禁
+
+| 层 | 脚本 | 检查内容 | 耗时 |
+|---|---|---|---|
+| 静态 | `qa/static_scan.py` | AST 级：裸 `except`、静默吞异常、可变默认参数、`eval`/`subprocess`/`pickle.loads`、SQL 拼接、硬编码密钥、关闭 TLS 校验 | < 1s |
+| 契约 | `qa/contract_check.py` | 真实构建后端路由表（86 条）vs 前端 71 处 `/api/v1/*` 调用，双向比对 | ~ 5s |
+| 行为 | `qa/test_api_authz.py` | 17 个鉴权/越权用例：真实路由 + 真实中间件 + 真实 JWT 依赖，仅对 DAO 打桩 | ~ 8s |
+
+**关键设计：接口测试不需要 MySQL / Redis。** 被测对象是"授权判定逻辑"本身——路由、`WhitelistMiddleware`、`get_login_user` 依赖、JWT 解码、响应封装全部使用仓库真实代码，只有 `*Dao` 层被打桩返回固定数据。因此"匿名请求是否进入业务逻辑""用户 A 能否拿到用户 B 的数据"这类断言是可信的，且能在 CI 里秒级跑完。
+
+### 6.2 实测结论
+
+| 项 | 结果 |
+|---|---|
+| 既有离线单测 | 87 项全部通过 |
+| JWT 加固 | 伪造签名 / 过期 / `alg=none` / refresh 冒充 access **均被拒绝**（401） |
+| 新增鉴权用例 | 17 项全部通过 |
+| 缺陷发现 | **2 个 P0、8 个 P1、5 个 P2、5 个 P3** |
+
+三类最值得记录的问题（完整清单见 [`qa/TEST_REPORT.md`](qa/TEST_REPORT.md)）：
+
+1. **鉴权是逐接口手工挂载的，没有全局兜底。** 86 个端点里 76 个声明了 `Depends(get_login_user)`，遗漏的 10 个中，`/user/info`、`/user/update` 两个可以被**匿名读写任意用户资料**（且 `UserTable.hide_fields` 为空，序列化结果带出密码哈希）。这类缺陷靠人工 review 极难穷举——用"枚举路由 + 断言 401"的测试反而一抓一个准。
+2. **白名单前缀匹配会"串味"。** 配置 `/api/v1/mcp/*` 归一化后前缀是 `/api/v1/mcp`，`startswith` 会同时命中 `/api/v1/mcp_server` 与 `/api/v1/mcp_user_config`；而白名单路径在 `get_login_user` 里直接返回 `UserPayload(user_id="1")`——**跳过 JWT 校验并授予管理员身份**。生产模板的 `whitelist_paths: []` 不受影响，但仓库自带的本地/示例配置是踩着的。
+3. **前后端契约靠人眼维持。** 比对出 5 处前端调用指向不存在的后端路由（含 `/user/logout` 缺失导致"登出后 token 仍有效"），以及 1 处字段名不一致（`mcp_server_id` vs `server_id`）使"MCP 用户配置保存"**功能 100% 失败**。这一处同时被 `vue-tsc` 报出（`TS2561`），说明类型门禁一旦进 CI，同类问题就再也漏不掉。
+
+### 6.3 建议的 CI 追加项
+
+```yaml
+- name: 接口鉴权回归
+  run: python3 qa/test_api_authz.py          # 17 用例，无需 MySQL/Redis
+
+- name: 前后端契约
+  run: python3 qa/contract_check.py           # 前端调用 404 即失败
+
+- name: 前端类型门禁
+  run: cd src/frontend && npm ci && npx vue-tsc --noEmit
+```
+
+三项合计约 20 秒，不需要任何外部服务。
+
+---
+
+## 七、技术难点与解决
 
 以下均为我在部署与调试中实际遇到并解决的问题，按「现象 → 根因 → 方案」记录。
 
@@ -330,9 +379,15 @@ python scripts/eval_harness.py --endpoint ... --update-baseline   # 更新基线
 - **根因**：`convert_mcp_config` 只处理 `sse` / `websocket` / `streamable_http`，`stdio` 分支返回 `None`，根本不进执行链路
 - **方案**：以 `--transport sse` 启动并注册 URL
 
+### 8. `add_header` 在 location 内会重置继承
+
+- **现象**：`server` 级声明的 `X-Content-Type-Options` / `X-Frame-Options` 在 `/minio/`、`/assets/` 等 location 下"消失"
+- **根因**：nginx 的 `add_header` **不合并**——当前层级只要出现一条 `add_header`，上一层的同名指令全部不再继承
+- **方案**：需要缓存头的 location 内显式重复声明安全头（本项由 `qa` 阶段的静态检查发现，属待验证/待修）
+
 ---
 
-## 七、快速开始
+## 八、快速开始
 
 ### 1. 生产部署（推荐）
 
@@ -375,14 +430,27 @@ npm install
 npm run dev
 ```
 
-### 3. 运行 RAG 端到端测试
+### 3. 运行质量门禁（无需数据库）
+
+```bash
+# Windows
+PY=src/backend/.venv/Scripts/python.exe
+# Linux / macOS
+PY=src/backend/.venv/bin/python
+
+$PY qa/static_scan.py            # 静态缺陷扫描
+$PY qa/contract_check.py         # 前后端契约比对
+$PY qa/test_api_authz.py -v      # 接口鉴权测试（17 用例）
+```
+
+### 4. 运行 RAG 端到端测试
 
 ```bash
 # 需后端容器已启动（容器名 agentchat-backend）
 python scripts/test_rag_e2e.py
 ```
 
-### 4. 调试自建 MCP Server
+### 5. 调试自建 MCP Server
 
 ```bash
 cd src/backend/agentchat/mcp_servers/demo
@@ -394,7 +462,7 @@ python mcp_demo.py --transport stdio
 python mcp_demo.py --transport sse --host 0.0.0.0 --port 8001
 ```
 
-### 5. 运行评测 Harness（语义缓存 / 埋点的回归验证）
+### 6. 运行评测 Harness（语义缓存 / 埋点的回归验证）
 
 ```bash
 # 不联网自测：验证 Harness 自身逻辑与门禁双向有效性（约 4 秒）
@@ -418,7 +486,7 @@ python scripts/eval_harness.py --endpoint http://localhost:7860 \
 
 ---
 
-## 八、目录结构
+## 九、目录结构
 
 ```text
 AgentChat/
@@ -429,6 +497,12 @@ AgentChat/
 │   ├── nginx/nginx.prod.conf        #   反代 + SSE 专项配置
 │   ├── deploy.sh                    #   一键部署与验收自检
 │   └── start_tunnel.sh / .bat       #   内网穿透
+├── qa/                              # 接口级质量门禁（新增）
+│   ├── static_scan.py               #   AST 静态缺陷扫描
+│   ├── contract_check.py            #   前后端路由契约比对
+│   ├── test_api_authz.py            #   鉴权 / 越权测试（17 用例）
+│   ├── README.md                    #   脚本用法与设计说明
+│   └── TEST_REPORT.md               #   质量评估报告（缺陷清单）
 ├── scripts/
 │   ├── test_rag_e2e.py              # RAG 链路端到端测试（新增）
 │   ├── upload_to_kb.py              # 知识库批量上传工具（新增）
@@ -437,7 +511,7 @@ AgentChat/
 │   ├── golden_set.jsonl             # 黄金集 24 条，全部标记 seed 占位（新增）
 │   ├── baseline.json                # 指标基线，只升不降（新增）
 │   ├── calibrate_threshold.py       # 语义缓存阈值标定工具（新增）
-│   └── test_semantic_cache*.py      # 语义缓存 / 接入层 / 埋点 / 接线 / Harness 单测（新增 5 个）
+│   └── test_semantic_cache*.py      # 三件套离线单测（共 6 个文件 / 87 用例，新增）
 ├── test-rag-data/                   # RAG 测试语料（新增）
 ├── backend-chain-overview.html      # 后端链路学习手册（新增）
 ├── public-deploy-checklist.html     # 公网部署清单（新增）
@@ -459,11 +533,26 @@ AgentChat/
 
 ---
 
-## 九、来源与许可
+## 十、已知问题
+
+质量评估发现的问题尚未全部修复，**优先项与复现方式记录在 [`qa/TEST_REPORT.md`](qa/TEST_REPORT.md)**。当前状态摘要：
+
+| 类别 | 现状 |
+|---|---|
+| 授权模型 | 逐接口手工挂载鉴权，无全局兜底；已定位 2 个未鉴权读写接口（P0）与 4 处水平越权（P1） |
+| 前后端契约 | 5 处前端调用指向不存在的路由；1 处字段名不一致导致功能不可用（P1） |
+| 前端类型 | `vue-tsc --noEmit` 24 个错误，`npm run lint` 当前不通过（P2） |
+| 错误语义 | 业务错误统一返回 HTTP 200，网关/APM 无法感知 5xx（P2） |
+
+> 说明：该仓库定位为工程能力展示，未承载真实用户数据。若计划公网部署，**请先修复 P0/P1 项**。
+
+---
+
+## 十一、来源与许可
 
 - 本项目基于开源项目 **AgentChat**（<https://github.com/Shy2593666979/AgentChat>）二次开发，采用 **MIT License**。
 - 原始版权归原作者所有。MIT 许可要求分发时保留原始版权声明与许可文本，因此本仓库保留 [`LICENSE`](LICENSE)。
-- 本仓库新增的 35 个文件（容器化部署、测试脚本、自建 MCP Server、技术文档、测试语料、稳健型三件套及其单测）为本人所写；其余核心代码版权归原作者。
+- 本仓库新增的 35 个功能文件（容器化部署、测试脚本、自建 MCP Server、技术文档、测试语料、稳健型三件套及其单测）与 `qa/` 下 5 个质量门禁文件为本人所写；其余核心代码版权归原作者。
 - 如需了解项目的原始设计与最新进展，请访问上游仓库。
 
 ---

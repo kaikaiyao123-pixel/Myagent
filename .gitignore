@@ -61,3 +61,6 @@ docker/.probe_*
 docker/.deploy_probe.*
 docker/build*.log
 docker/*.tmp
+
+# qa 静态扫描产物（每次运行重新生成）
+qa/static_findings.json
